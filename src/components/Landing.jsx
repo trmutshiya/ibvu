@@ -57,9 +57,9 @@ export default function Landing({ skipped, onSkip, onEnter, panel, onPanel }) {
               beneath us. IBVU is inspired by the Shona word <em>ivhu</em>, meaning
               soil or earth, the foundation from which life, knowledge, and innovation grow.
               <br /><br />
-              Founded by neuroscientist Tatenda Mutshiya, IBVU builds scientific
-              platforms that draw on the knowledge of people around the world and
-              bring it into conversation with modern research.
+              Founded by neuroscientist Tatenda Mutshiya and analytical chemist Dara Pierre,
+              IBVU builds scientific platforms that draw on knowledge from people around the
+              world and bring it into conversation with modern research.
               <br /><br />
               Herbarium Scientifica is the first of these platforms. It provides global
               user submitted plant solutions which are scientifically verified to provide
@@ -73,8 +73,10 @@ export default function Landing({ skipped, onSkip, onEnter, panel, onPanel }) {
             </p>
             <div className="panel-rule" />
             <div style={{ marginTop: 28 }}>
-              <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, fontWeight: 300, letterSpacing: 4, textTransform: "uppercase", color: "rgba(245,240,232,0.3)", marginBottom: 10 }}>Founder</p>
+              <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, fontWeight: 300, letterSpacing: 4, textTransform: "uppercase", color: "rgba(245,240,232,0.3)", marginBottom: 10 }}>Get to Know the Founders</p>
               <a href="https://www.linkedin.com/in/tatenda-mutshiya/" target="_blank" rel="noreferrer" className="panel-contact-link">Tatenda Mutshiya ↗</a>
+              <br />
+              <a href="https://www.linkedin.com/in/dlpierre/" target="_blank" rel="noreferrer" className="panel-contact-link">Dara Pierre ↗</a>
             </div>
           </div>
         </div>
@@ -87,7 +89,7 @@ export default function Landing({ skipped, onSkip, onEnter, panel, onPanel }) {
             <p className="panel-eyebrow">get in touch</p>
             <h2 className="panel-title">Contact</h2>
             <p className="panel-body">For enquiries, collaborations, or to learn more about IBVU and what we're building.</p>
-            <a className="panel-contact-link" href="mailto:hello@ibvu.com">hello@ibvu.com</a>
+            <a className="panel-contact-link" href="mailto:hello@ibvu.org">hello@ibvu.org</a>
             <div className="panel-rule" />
           </div>
         </div>
