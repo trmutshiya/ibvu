@@ -14,6 +14,7 @@ export default function CompletionPanel({ submission, onPublish, onCancel, admin
   const [category,   setCategory]   = useState("");
   const [origin,     setOrigin]     = useState("");
   const [description,setDesc]       = useState("");
+  const [otherNames, setOtherNames] = useState(submission.otherNames || "");
   const [condResults,setCondResults]= useState([]);
   const [color,      setColor]      = useState(COLOUR_PALETTE[0]);
   const [publishing, setPublishing] = useState(false);
@@ -62,6 +63,7 @@ export default function CompletionPanel({ submission, onPublish, onCancel, admin
       const herbData = {
         submission_id:     submission.id,
         name:              submission.name,
+        otherNames:        otherNames,
         latin:             latinName || submission.name,
         category:          category || "Herbal Medicine",
         origin:            origin,
@@ -94,6 +96,11 @@ export default function CompletionPanel({ submission, onPublish, onCancel, admin
         </div>
 
         <div className="completion-body">
+          <div className="cp-row">
+            <span className="cp-label">Other Names (comma-separated · editable)</span>
+            <input value={otherNames} onChange={e => setOtherNames(e.target.value)} placeholder="e.g. Wild ginger, Cape ginger" />
+          </div>
+
           <div className="cp-two">
             <div className="cp-row">
               <span className="cp-label">Latin Name (GBIF)</span>

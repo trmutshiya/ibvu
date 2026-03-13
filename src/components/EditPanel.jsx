@@ -6,6 +6,7 @@ import { Sentry } from '../lib/sentry.js';
 
 export default function EditPanel({ herb, onSave, onCancel, isStatic, adminEmail }) {
   const [name,        setName]        = useState(herb.name        || "");
+  const [otherNames,  setOtherNames]  = useState(herb.otherNames  || herb.other_names || "");
   const [latin,       setLatin]       = useState(herb.latin       || herb.latinName || "");
   const [category,    setCategory]    = useState(herb.category    || "Herbal Medicine");
   const [origin,      setOrigin]      = useState(herb.origin      || "");
@@ -24,7 +25,7 @@ export default function EditPanel({ herb, onSave, onCancel, isStatic, adminEmail
     setSaving(true); setSaveError("");
     try {
       const updates = {
-        name, latin, category, origin, description,
+        name, otherNames, latin, category, origin, description,
         uses: usesText.split("\n").map(s => s.trim()).filter(Boolean),
         conditions, color,
       };
@@ -57,6 +58,10 @@ export default function EditPanel({ herb, onSave, onCancel, isStatic, adminEmail
           <div className="cp-row">
             <span className="cp-label">Common Name</span>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Baobab" />
+          </div>
+          <div className="cp-row">
+            <span className="cp-label">Other Names (comma-separated)</span>
+            <input value={otherNames} onChange={e => setOtherNames(e.target.value)} placeholder="e.g. Wild ginger, Cape ginger" />
           </div>
           <div className="cp-row">
             <span className="cp-label">Latin Name</span>
