@@ -25,7 +25,7 @@ export default function EditPanel({ herb, onSave, onCancel, isStatic, adminEmail
     setSaving(true); setSaveError("");
     try {
       const updates = {
-        name, otherNames, latin, category, origin, description,
+        name, other_names: otherNames, latin, category, origin, description,
         uses: usesText.split("\n").map(s => s.trim()).filter(Boolean),
         conditions, color,
       };

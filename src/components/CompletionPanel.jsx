@@ -63,7 +63,7 @@ export default function CompletionPanel({ submission, onPublish, onCancel, admin
       const herbData = {
         submission_id:     submission.id,
         name:              submission.name,
-        otherNames:        otherNames,
+        other_names:       otherNames,
         latin:             latinName || submission.name,
         category:          category || "Herbal Medicine",
         origin:            origin,
