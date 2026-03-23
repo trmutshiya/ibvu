@@ -103,7 +103,9 @@ export async function sbFetchApprovedFull() {
 }
 
 export async function sbUpdateHerb(id, updates, changedBy) {
-  const payload = { ...updates, updated_at: new Date().toISOString(), updated_by: changedBy || null };
+  // approved_herbs has no other_names column — strip it before patching
+  const { other_names, ...rest } = updates;
+  const payload = { ...rest, updated_at: new Date().toISOString(), updated_by: changedBy || null };
   const res = await fetch(SUPABASE_URL + "/rest/v1/approved_herbs?id=eq." + id, {
     method: "PATCH",
     headers: {
