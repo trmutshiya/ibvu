@@ -1,3 +1,8 @@
+// IBVU v6.09 — what changed in this file: a picture set to "show the whole photo"
+// (src/lib/frame.js) is shown as a plain picture in its own shape, marked
+// data-whole so the page can size it (herb photos: up to the tile's size). A picture
+// that only carries a caption (no moving or zooming) is shown as a plain picture.
+//
 // IBVU v6.04 — new file. Shows a picture the way it was framed in admin
 // (moved, zoomed in). The picture always fills its box. See src/lib/frame.js.
 // A picture with no framing is shown exactly as before: a plain <img>.
@@ -6,14 +11,15 @@
 //   fallback  the built-in photo, used when no picture was chosen
 //   ratio     for pictures that normally keep their own shape (article
 //             covers, herb photos): the shape to use once they are framed
-import { parseImage, frameStyles } from '../lib/frame.js';
+import { parseImage, frameStyles, isDefaultFrame } from '../lib/frame.js';
 
 export default function Framed({ value, fallback = "", alt = "", className, ratio, ...rest }) {
   const { src: own, frame, orig } = parseImage(value);
   const src = own || fallback;
   if (!src) return null;
   // No framing, or a ready-framed copy (newsletter covers): an ordinary picture.
-  if (!frame || orig) return <img className={className} src={src} alt={alt} {...rest} />;
+  if (frame && frame.whole) return <img className={className} src={src} alt={alt} data-whole="" {...rest} />;
+  if (!frame || orig || isDefaultFrame(frame)) return <img className={className} src={src} alt={alt} {...rest} />;
   const s = frameStyles(frame);
   // The size comes from the page's own styles (class on the frame); the
   // framing only decides what shows inside it.

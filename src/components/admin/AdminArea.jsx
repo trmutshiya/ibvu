@@ -1,3 +1,10 @@
+// IBVU v6.09 — what changed in this file:
+// - Events: the start time is UK time; the form shows whether it will appear as GMT or
+//   BST, and the list shows it too. New "Preview" button shows the event tile exactly
+//   as visitors will see it (also for a new, unsaved event).
+// - Herb photos: the framing window has "Show the whole photo".
+// - Article and blog covers can have a caption (shown under the cover in the open article).
+//
 // IBVU v6.06 — what changed in this file: herb photos are framed as a square, the
 // shape they now have on the herb page and in the Herbarium list.
 //
@@ -95,12 +102,13 @@ import {
   saveEvent, setEventStatus, deleteEvent,
   saveArticle, setArticleStatus, deleteArticle,
   savePage, resetPage, savePerson, removePerson,
-  formatDate, todayISO, excerpt, pageUrl, WRITING, sectionOf, articlePath,
+  formatDate, eventTime, ukZone, todayISO, excerpt, pageUrl, WRITING, sectionOf, articlePath,
 } from '../../lib/content.js';
 import { DEFAULT_PAGES, PAGE_FORMS } from '../../content/defaults.js';
 import { isEmail, ENQUIRY_TYPES } from '../../lib/messages.js';
 import { MAILING_LISTS, listName } from '../../lib/lists.js';
 import { ArticleView } from '../Media.jsx';
+import { EventTile } from '../Shop.jsx';
 import { shareLinks, copyText } from '../Share.jsx';
 import { usePageTitle } from '../../lib/site.js';
 import { mergeHerbs } from '../../lib/herbs.js';
@@ -176,6 +184,7 @@ function EventForm({ initial, role, onDone, onError, onPublished }) {
     return d ? { ...initial, ...d.data } : initial;
   });
   const [problem, setProblem] = useState("");
+  const [preview, setPreview] = useState(false);
   const touched = useRef(false);
   const set = key => e => { touched.current = true; setEv(v => ({ ...v, [key]: e.target.value })); };
   // Draft changes that arrive after the form opened are filled in.
@@ -190,7 +199,7 @@ function EventForm({ initial, role, onDone, onError, onPublished }) {
     if (!result.ok) { onError(result.error); return; }
     if (status === "published" && ev.status !== "published") {
       setEventStatus(result.id, "published");
-      onPublished({ title: ev.title.trim(), text: [formatDate(ev.date), ev.time, ev.location].filter(Boolean).join(" · "), path: "/shop/events" });
+      onPublished({ title: ev.title.trim(), text: [formatDate(ev.date), eventTime(ev), ev.location].filter(Boolean).join(" · "), path: "/shop/events" });
     }
     onDone();
   }
@@ -217,14 +226,22 @@ function EventForm({ initial, role, onDone, onError, onPublished }) {
       <div className="cadmin-grid2">
         <div className="cadmin-field wide"><label htmlFor="ev-title">Title</label><input id="ev-title" value={ev.title} onChange={set("title")} /></div>
         <div className="cadmin-field"><label htmlFor="ev-date">Date</label><input id="ev-date" type="date" value={ev.date} onChange={set("date")} /></div>
-        <div className="cadmin-field"><label htmlFor="ev-time">Start time (optional)</label><input id="ev-time" type="time" value={ev.time} onChange={set("time")} /></div>
+        <div className="cadmin-field"><label htmlFor="ev-time">Start time, UK time (optional)</label><input id="ev-time" type="time" value={ev.time} onChange={set("time")} />
+          {ev.time && <p className="cadmin-hint ev-zone">{ev.date ? "Shown as " + eventTime(ev) + (ukZone(ev.date, ev.time) === "BST" ? " (British Summer Time)" : " (Greenwich Mean Time)") : "Set the date to see whether it shows as GMT or BST."}</p>}</div>
         <div className="cadmin-field wide"><label htmlFor="ev-place">Place</label><input id="ev-place" value={ev.location} onChange={set("location")} placeholder="Venue and city, or Online" /></div>
         <div className="cadmin-field wide"><label htmlFor="ev-desc">Description</label><textarea id="ev-desc" rows="4" value={ev.description} onChange={set("description")} /></div>
         <div className="cadmin-field wide"><label htmlFor="ev-book">Booking link (optional)</label><input id="ev-book" type="url" value={ev.bookingUrl} onChange={set("bookingUrl")} placeholder="https://…" /></div>
         <div className="cadmin-field wide"><label>Image (optional)</label><ImageField value={ev.image} folder="events" shapes={[SHAPES.event]} onChange={image => { touched.current = true; setEv(v => ({ ...v, image })); }} onError={onError} /></div>
       </div>
       {problem && <p className="cadmin-problem" role="alert">{problem}</p>}
-      {ev.date && ev.date < todayISO() && <p className="cadmin-hint">This date has passed, so the event will not show on the site.</p>}
+      {ev.date && ev.date < todayISO() && <p className="cadmin-hint">This date has passed, so it will show under Past events, not as a tile.</p>}
+      <div className="cadmin-row"><button type="button" className={"cadmin-btn" + (preview ? " on" : "")} aria-pressed={preview} onClick={() => setPreview(p => !p)}>{preview ? "Hide preview" : "Preview"}</button></div>
+      {preview && (
+        <div className="cadmin-preview ev-preview" aria-label="Preview of the event">
+          <p className="cadmin-hint">How it will look on the Events page:</p>
+          {ev.title.trim() ? <div className="event-list"><EventTile event={{ ...ev, id: ev.id || "preview" }} /></div> : <p className="cadmin-empty">Give the event a title to see the preview.</p>}
+        </div>
+      )}
       {isLive ? (
         <div className="cadmin-row">
           {can(role, "publish") && <button type="button" className="cadmin-btn go" onClick={publishChanges}>Publish changes</button>}
@@ -269,13 +286,13 @@ function EventsAdmin({ role, onError }) {
               <div className="cadmin-item" key={ev.id}>
                 <div className="cadmin-item-main">
                   <p className="cadmin-item-title">{ev.title || "(untitled)"} <StatusBadge status={ev.status} />{drafts["event:" + ev.id] && <WaitingBadge />}{ev.date && ev.date < today && <span className="cadmin-badge past">Past</span>}</p>
-                  <p className="cadmin-item-meta">{ev.date ? formatDate(ev.date) : "No date yet"}{ev.time ? " · " + ev.time : ""}{ev.location ? " · " + ev.location : ""}</p>
+                  <p className="cadmin-item-meta">{ev.date ? formatDate(ev.date) : "No date yet"}{ev.time ? " · " + eventTime(ev) : ""}{ev.location ? " · " + ev.location : ""}</p>
                 </div>
                 <div className="cadmin-item-actions">
                   <button type="button" className="cadmin-btn" onClick={() => { setShared(null); setEditing(ev); }}>{ev.status === "published" && !can(role, "publish") ? "Suggest changes" : "Edit"}</button>
                   {can(role, "publish") && (ev.status === "published"
                     ? <button type="button" className="cadmin-btn" onClick={() => setEventStatus(ev.id, "draft")}>Unpublish</button>
-                    : <button type="button" className="cadmin-btn go" disabled={!ev.date} title={ev.date ? "" : "Set a date first"} onClick={() => { setEventStatus(ev.id, "published"); setShared({ title: ev.title, text: [formatDate(ev.date), ev.time, ev.location].filter(Boolean).join(" · "), path: "/shop/events" }); }}>Publish</button>)}
+                    : <button type="button" className="cadmin-btn go" disabled={!ev.date} title={ev.date ? "" : "Set a date first"} onClick={() => { setEventStatus(ev.id, "published"); setShared({ title: ev.title, text: [formatDate(ev.date), eventTime(ev), ev.location].filter(Boolean).join(" · "), path: "/shop/events" }); }}>Publish</button>)}
                   {can(role, "delete") && <DeleteButton onDelete={() => deleteEvent(ev.id)} />}
                 </div>
               </div>
@@ -411,7 +428,7 @@ function ArticleEditor({ initial, role, onBack, onError, onPublished }) {
           <div className="cadmin-grid2">
             <div className="cadmin-field wide"><label htmlFor="ar-summary">Short summary for the tile (optional; the opening lines are used if empty)</label><textarea id="ar-summary" rows="2" value={a.summary} onChange={e => change({ summary: e.target.value })} /></div>
             <div className="cadmin-field"><label htmlFor="ar-author">Author (optional)</label><input id="ar-author" value={a.author} onChange={e => change({ author: e.target.value })} /></div>
-            <div className="cadmin-field"><label>Cover image</label><ImageField value={a.cover} label="Cover image" folder="articles" shapes={[SHAPES.tile]} hint="Framing sets the tile. The open article shows the whole picture. Best at least 1200 pixels wide." onChange={cover => change({ cover })} onError={onError} /></div>
+            <div className="cadmin-field"><label>Cover image</label><ImageField value={a.cover} label="Cover image" folder="articles" shapes={[SHAPES.tile]} withCaption hint="Framing sets the tile. The open article shows the whole picture. Best at least 1200 pixels wide." onChange={cover => change({ cover })} onError={onError} /></div>
           </div>
           <Suspense fallback={<p className="cadmin-hint">Loading the editor…</p>}>
             <RichEditor key={bodyKey} value={a.body} onChange={body => change({ body })} onError={onError} />
@@ -927,7 +944,7 @@ function HerbPhotoRow({ herb, photo, onError }) {
         <input ref={ref} type="file" accept="image/*" hidden onChange={pick} aria-label={"Photo for " + herb.name} />
       </div>
       {framing && photo && (
-        <FrameEditor src={parsed.src} frame={parsed.frame} shapes={[SHAPES.herb]} busy={saving} title={"Frame the photo of " + herb.name}
+        <FrameEditor src={parsed.src} frame={parsed.frame} shapes={[SHAPES.herb]} allowWhole busy={saving} title={"Frame the photo of " + herb.name}
           onCancel={() => setFraming(false)} onSave={saveFrame} />
       )}
     </div>

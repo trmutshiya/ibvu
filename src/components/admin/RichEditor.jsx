@@ -1,3 +1,18 @@
+// IBVU v6.10 — what changed in this file: tileMode (used by Newsletters):
+// - a new picture starts at tile size: it fits inside a 340 × 227 px tile in its own
+//   shape (after cropping a new picture, tile size of its new shape);
+// - drag a corner to any size from 100 px to the full 544 px email column; it clicks
+//   into "Tile size" and "Full width" as it passes them;
+// - the size is kept in pixels of the email column (data-px, with data-w as a share of
+//   it) and shown as min(px, share), so on a phone it shrinks in proportion;
+// - the picture bar has − Smaller, Larger +, Tile size and Full width (no left/right:
+//   emails show pictures centred).
+// Articles and blog posts work as before.
+//
+// IBVU v6.09 — what changed in this file: the framing window that opens after adding a
+// picture (and "Crop and frame…") now has a Caption box, so a caption can be added
+// straight away. "Caption…" in the picture bar still works as before.
+//
 // IBVU v6.05 — what changed in this file: drag to resize pictures in the text
 // (as in the approved trial). Click a picture and handles appear on its
 // corners and sides: drag outwards to make it larger, inwards to make it
@@ -37,7 +52,7 @@ import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import { uploadSiteImage } from '../../lib/content.js';
-import { renderFramed, isDefaultFrame } from '../../lib/frame.js';
+import { renderFramed, isDefaultFrame, loadImage, tileWidth, shownWidth, EMAIL_COLUMN as COL } from '../../lib/frame.js';
 import FrameEditor from './FrameEditor.jsx';
 
 // Picture sizes: the width on the site (index.css) and in emails (pixels).
@@ -53,13 +68,18 @@ const SNAPS = [{ v: 33.33, n: "Small" }, { v: 50, n: "Medium" }, { v: 75, n: "La
 const MIN_W = 20, SNAP_RANGE = 2.5, EMAIL_COLUMN = 544;
 export function sizeFor(w) { return w < 42 ? "small" : w < 66 ? "medium" : w < 87 ? "large" : null; }
 const widthOf = a => a.w || SIZE_W[a.size] || 100;
+// tileMode (newsletters): the width in pixels of the 544 px email column.
+const MIN_PX = 100, PX_SNAP = 10;
+const pxOf = a => a.px || (a.w ? Math.round(COL * a.w / 100) : COL);
+const pxAttrs = px => { const r = Math.round(Math.max(MIN_PX, Math.min(COL, px))); return { px: r, w: Math.round(r / COL * 10000) / 100, size: null }; };
 
 // A picture in the editor, with drag handles when it is selected.
-function PictureView({ node, updateAttributes, selected }) {
+function PictureView({ node, updateAttributes, selected, extension }) {
   const a = node.attrs;
-  const [live, setLive] = useState(null); // { w, snap } while dragging
+  const tile = !!(extension && extension.options.tileMode);
+  const [live, setLive] = useState(null); // { w, snap } while dragging (tileMode: { px, snap })
   const ref = useRef(null);
-  const w = live ? live.w : widthOf(a);
+  const w = live && !tile ? live.w : widthOf(a);
 
   function start(e, side) {
     e.preventDefault(); e.stopPropagation();
@@ -67,12 +87,25 @@ function PictureView({ node, updateAttributes, selected }) {
     const cs = getComputedStyle(column);
     const colW = column.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
     const startPx = el.getBoundingClientRect().width;
-    const centred = !a.align;
+    const centred = tile || !a.align;
     const x0 = e.clientX;
-    let last = widthOf(a);
+    const img = el.querySelector("img");
+    const ratio = img && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 1.5;
+    let last = tile ? pxOf(a) : widthOf(a);
     const move = ev => {
       let dx = (ev.clientX - x0) * side;
       if (centred) dx *= 2;                      // centred pictures grow on both sides
+      if (tile) {
+        const base = Math.min(colW, COL);        // a narrow screen shows everything smaller
+        let px = Math.max(MIN_PX, Math.min(COL, (startPx + dx) / base * COL));
+        const t = tileWidth(ratio);
+        const snap = Math.abs(px - t) <= PX_SNAP ? "Tile size" : COL - px <= PX_SNAP ? "Full width" : "";
+        if (snap === "Tile size") px = t;
+        if (snap === "Full width") px = COL;
+        last = px;
+        setLive({ px: Math.round(px), snap });
+        return;
+      }
       let p = Math.max(MIN_W, Math.min(100, (startPx + dx) / colW * 100));
       const snap = SNAPS.find(s => Math.abs(s.v - p) <= SNAP_RANGE);
       if (snap) p = snap.v;
@@ -83,6 +116,7 @@ function PictureView({ node, updateAttributes, selected }) {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setLive(null);
+      if (tile) { updateAttributes(pxAttrs(last)); return; }
       const r = Math.round(last * 100) / 100;
       updateAttributes({ w: r >= 100 ? null : r, size: sizeFor(r) });
     };
@@ -90,16 +124,19 @@ function PictureView({ node, updateAttributes, selected }) {
     window.addEventListener("pointerup", up);
   }
 
-  const size = sizeFor(w);
+  const size = tile ? null : sizeFor(w);
+  const width = tile ? shownWidth(live ? live.px : pxOf(a)) : w + "%";
+  const tip = !live ? "" : tile ? (live.snap ? live.snap + " · " : "") + live.px + " px wide"
+    : (live.snap ? live.snap + " · " : "") + Math.round(live.w) + "% · about " + live.px + " px";
   return (
     <NodeViewWrapper ref={ref} className={"rte-pic" + (selected ? " sel" : "") + (live ? " dragging" : "")}
-      data-align={a.align || undefined} data-size={size || undefined} style={{ width: w + "%" }}>
+      data-align={tile ? undefined : a.align || undefined} data-size={size || undefined} style={{ width }}>
       <img src={a.src} alt={a.alt || ""} draggable="false" />
       {a.caption && <span className="rte-pic-caption">{a.caption}</span>}
       {selected && ["tl", "tr", "bl", "br", "ml", "mr"].map(k => (
         <span key={k} className={"rte-handle " + k} aria-hidden="true" onPointerDown={e => start(e, k.endsWith("r") ? 1 : -1)} />
       ))}
-      {live && <span className={"rte-size-tip" + (live.snap ? " snapped" : "")}>{(live.snap ? live.snap + " · " : "") + Math.round(live.w) + "% · about " + live.px + " px"}</span>}
+      {live && <span className={"rte-size-tip" + (live.snap ? " snapped" : "")}>{tip}</span>}
     </NodeViewWrapper>
   );
 }
@@ -115,6 +152,7 @@ const CROP_SHAPES = [
 
 // The picture with its size, position and (after cropping) its original.
 const FramedImage = Image.extend({
+  addOptions() { return { ...this.parent?.(), tileMode: false }; },
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -130,7 +168,14 @@ const FramedImage = Image.extend({
       w: {
         default: null,
         parseHTML: el => { const v = parseFloat(el.getAttribute("data-w")); return Number.isFinite(v) ? v : null; },
-        renderHTML: a => (a.w ? { "data-w": String(a.w), style: "width:" + a.w + "%", width: String(Math.round(EMAIL_COLUMN * a.w / 100)) } : {}),
+        renderHTML: a => (a.px ? { "data-w": String(a.w || Math.round(a.px / COL * 10000) / 100), style: "width:" + shownWidth(a.px), width: String(a.px) }
+          : a.w ? { "data-w": String(a.w), style: "width:" + a.w + "%", width: String(Math.round(EMAIL_COLUMN * a.w / 100)) } : {}),
+      },
+      // v6.10, newsletters: the width in pixels of the 544 px email column
+      px: {
+        default: null,
+        parseHTML: el => { const v = parseInt(el.getAttribute("data-px"), 10); return Number.isFinite(v) ? v : null; },
+        renderHTML: a => (a.px ? { "data-px": String(a.px) } : {}),
       },
       align: {
         default: null,
@@ -157,6 +202,7 @@ const FramedImage = Image.extend({
     const step = d => () => {
       const sel = this.editor.state.selection;
       if (!(sel instanceof NodeSelection) || sel.node.type.name !== this.name) return false;
+      if (this.options.tileMode) return this.editor.commands.updateAttributes(this.name, pxAttrs(pxOf(sel.node.attrs) + d * 4));
       const w = Math.max(MIN_W, Math.min(100, widthOf(sel.node.attrs) + d));
       return this.editor.commands.updateAttributes(this.name, { w: w >= 100 ? null : w, size: sizeFor(w) });
     };
@@ -164,7 +210,7 @@ const FramedImage = Image.extend({
   },
 });
 
-export default function RichEditor({ value, onChange, onError, onReady, placeholder = "Write your article…" }) {
+export default function RichEditor({ value, onChange, onError, onReady, placeholder = "Write your article…", tileMode = false }) {
   const fileRef = useRef(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
@@ -178,7 +224,7 @@ export default function RichEditor({ value, onChange, onError, onReady, placehol
     extensions: [
       StarterKit.configure({ heading: { levels: [2, 3] } }),
       Link.configure({ openOnClick: false, autolink: true }),
-      FramedImage.configure({ allowBase64: true }),
+      FramedImage.configure({ allowBase64: true, tileMode }),
       Placeholder.configure({ placeholder }),
     ],
     content: value || "",
@@ -210,7 +256,13 @@ export default function RichEditor({ value, onChange, onError, onReady, placehol
     if (!file) return;
     try {
       const src = await uploadSiteImage(file, { maxSide: 1400, quality: 0.8, folder: "articles" });
-      editor.chain().focus().setImage({ src }).run();
+      let extra = {};
+      if (tileMode) { // a new picture starts at tile size
+        let ratio = 1.5;
+        try { const im = await loadImage(src); ratio = im.naturalWidth / im.naturalHeight; } catch { /* keep 3:2 */ }
+        extra = pxAttrs(tileWidth(ratio));
+      }
+      editor.chain().focus().setImage({ src, ...extra }).run();
       // select the new picture so its tools (and the framing window) apply to it
       let at = null;
       editor.state.doc.descendants((node, pos) => { if (node.type.name === "image" && node.attrs.src === src) at = pos; });
@@ -221,6 +273,12 @@ export default function RichEditor({ value, onChange, onError, onReady, placehol
   const onImage = editor.isActive("image");
   const img = onImage ? editor.getAttributes("image") : {};
   const setImg = attrs => editor.chain().focus().updateAttributes("image", attrs).run();
+  // tileMode: tile size for the chosen picture's shape
+  let tileNow = tileWidth(1.5);
+  if (tileMode && onImage) {
+    const el = editor.view.dom.querySelector(".rte-pic.sel img");
+    if (el && el.naturalHeight) tileNow = tileWidth(el.naturalWidth / el.naturalHeight);
+  }
 
   // Puts the cursor just below the selected picture.
   function leavePicture() {
@@ -230,7 +288,8 @@ export default function RichEditor({ value, onChange, onError, onReady, placehol
   }
   function closeCrop() { setCropping(false); if (fresh) { setFresh(false); leavePicture(); } }
 
-  async function saveCrop({ frame, rotatedFile, ratio, shape }) {
+  async function saveCrop({ frame, rotatedFile, ratio, shape, caption: newCaption }) {
+    if ((newCaption || "") !== (img.caption || "")) setImg({ caption: newCaption || null });
     // Nothing changed: keep the picture as it is (no cropped copy).
     if (!rotatedFile && shape === "original" && isDefaultFrame(frame)) { closeCrop(); return; }
     setSaving(true);
@@ -240,7 +299,8 @@ export default function RichEditor({ value, onChange, onError, onReady, placehol
       if (rotatedFile) base = await uploadSiteImage(rotatedFile, { maxSide: 1400, quality: 0.8, folder: "articles" });
       const file = await renderFramed(base, frame, ratio, 1400);
       const src = await uploadSiteImage(file, { maxSide: 1400, quality: 0.82, folder: "articles" });
-      setImg({ src, orig: base });
+      // a picture just added keeps to tile size in its new shape
+      setImg({ src, orig: base, ...(tileMode && fresh ? pxAttrs(tileWidth(typeof ratio === "number" ? ratio : 1.5)) : {}) });
       closeCrop();
     } catch (err) { if (onError) onError(err.message); }
     setSaving(false);
@@ -280,9 +340,21 @@ export default function RichEditor({ value, onChange, onError, onReady, placehol
       {onImage && (
         <div className="rte-imagebar" role="toolbar" aria-label="Picture">
           <span className="rte-imagebar-label">Picture:</span>
-          {SIZES.map(s => <Btn key={s.key} label={s.label} active={Math.abs(widthOf(img) - (SIZE_W[s.key] || 100)) < 0.5} onClick={() => setImg({ size: s.key === "full" ? null : s.key, w: s.key === "full" ? null : SIZE_W[s.key] })} />)}
-          <span className="rte-gap" />
-          {PLACES.map(p => <Btn key={p.key} label={p.label} active={(img.align || "center") === p.key} onClick={() => setImg({ align: p.key === "center" ? null : p.key })} />)}
+          {tileMode ? (
+            <>
+              <Btn label="− Smaller" onClick={() => setImg(pxAttrs(pxOf(img) - 20))} />
+              <Btn label="Larger +" onClick={() => setImg(pxAttrs(pxOf(img) + 20))} />
+              <Btn label="Tile size" active={pxOf(img) === tileNow} onClick={() => setImg(pxAttrs(tileNow))} />
+              <Btn label="Full width" active={pxOf(img) >= COL} onClick={() => setImg(pxAttrs(COL))} />
+              <span className="rte-imagebar-size">{pxOf(img)} px wide</span>
+            </>
+          ) : (
+            <>
+              {SIZES.map(s => <Btn key={s.key} label={s.label} active={Math.abs(widthOf(img) - (SIZE_W[s.key] || 100)) < 0.5} onClick={() => setImg({ size: s.key === "full" ? null : s.key, w: s.key === "full" ? null : SIZE_W[s.key] })} />)}
+              <span className="rte-gap" />
+              {PLACES.map(p => <Btn key={p.key} label={p.label} active={(img.align || "center") === p.key} onClick={() => setImg({ align: p.key === "center" ? null : p.key })} />)}
+            </>
+          )}
           <span className="rte-gap" />
           <Btn label="Crop and frame…" onClick={() => setCropping(true)} />
           <Btn label={img.caption ? "Edit caption" : "Caption…"} active={!!img.caption} onClick={() => { setCaption(img.caption || ""); setCaptionOpen(true); }} />
@@ -302,11 +374,11 @@ export default function RichEditor({ value, onChange, onError, onReady, placehol
       )}
 
       {!onImage && /<img/.test(value || "") && <p className="rte-caption-note">Click a picture to change its size, position, crop or caption.</p>}
-      {onImage && !captionOpen && <p className="rte-caption-note">Drag a corner or side handle to make the picture smaller or larger. It clicks into Small, Medium, Large and Full as it passes them.</p>}
+      {onImage && !captionOpen && <p className="rte-caption-note">{tileMode ? "Drag a corner or side handle to make the picture smaller or larger. It clicks into Tile size and Full width as it passes them. On a phone every picture shows smaller, in proportion." : "Drag a corner or side handle to make the picture smaller or larger. It clicks into Small, Medium, Large and Full as it passes them."}</p>}
       <EditorContent editor={editor} className="rte-content article-body" />
 
       {cropping && onImage && (
-        <FrameEditor src={img.orig || img.src} shapes={CROP_SHAPES} chooseShape busy={saving} title="Crop and frame the picture"
+        <FrameEditor src={img.orig || img.src} shapes={CROP_SHAPES} chooseShape caption={img.caption || ""} busy={saving} title="Crop and frame the picture"
           onCancel={closeCrop} onSave={saveCrop} />
       )}
     </div>

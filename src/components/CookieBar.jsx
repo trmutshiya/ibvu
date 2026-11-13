@@ -1,3 +1,7 @@
+// IBVU v6.09 — what changed in this file: the bar is now a smaller card in the
+// bottom-left corner (full width on a phone). Text first, then the Cookie Policy link,
+// then Accept All and Reject All side by side underneath. Same brown (#3d2c1e).
+//
 // IBVU v6.08 — what changed in this file: new wording (paragraphs allowed), Accept All
 // first, then Reject All (same size and style), and a "Cookie Policy" link that opens
 // the cookie section of the Privacy page.

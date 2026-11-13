@@ -1,3 +1,7 @@
+// IBVU v6.09 — what changed in this file: "← ibvu" (top left) now goes back to the
+// previous page. If there is no previous page on this site (someone arrived from Google
+// or a shared link), it goes to the home page as before.
+//
 // IBVU v6.03 — what changed in this file: "Newsletter" (past issues, ibvu.org/newsletter) is added under About, after Media.
 //
 // IBVU v5.8 — what changed in this file since v5.7:
@@ -15,7 +19,7 @@
 // the About pop-up, Media under About. Blog and Research Library are listed
 // but not clickable because those pages are not built.
 import { useState, useRef, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useSite } from '../lib/site.js';
 import { usePage } from '../lib/content.js';
 
@@ -52,7 +56,12 @@ export default function SiteHeader({
   intro = false,    // home page only: fade in while the intro animation plays
 }) {
   const { openAbout, goHerbarium, goShop } = useSite();
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
+  const navigate = useNavigate();
+  // "default" = the first page opened on this site: nothing to go back to.
+  const canGoBack = location.key !== "default";
+  const goBack = e => { if (canGoBack) { e.preventDefault(); navigate(-1); } };
   const shop = usePage("shop");
   const isHome = pathname === "/";
   const at = prefix => pathname.startsWith(prefix);
@@ -119,7 +128,7 @@ export default function SiteHeader({
   return (
     <header className={cls} ref={ref}>
       <div className="hdr-left">
-        {!isHome && <Link className="hdr-back" to="/" aria-label="Back to the IBVU home page">← ibvu</Link>}
+        {!isHome && <Link className="hdr-back" to="/" onClick={goBack} aria-label={canGoBack ? "Back to the previous page" : "Back to the IBVU home page"}>← ibvu</Link>}
       </div>
 
       {/* Laptop and desktop: seven items across */}

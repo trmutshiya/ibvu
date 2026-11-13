@@ -1,3 +1,7 @@
+// IBVU v6.09 — what changed in this file: event times show "GMT" or "BST" after them,
+// worked out from the date (all times are UK time). EventTile is exported so admin can
+// preview an event exactly as visitors will see it.
+//
 // IBVU v6.07 — what changed in this file: "Book a place" clicks are counted in Google Analytics (only with consent).
 //
 // IBVU v6.04 — what changed in this file: the Shop tiles, the Herb Mail Club and Events pictures and event
@@ -35,7 +39,7 @@ import { SmartLink } from './Innovate.jsx';
 import { ShareButtons, AddToCalendar } from './Share.jsx';
 import { usePageTitle } from '../lib/site.js';
 import { useState } from 'react';
-import { usePage, useUpcomingEvents, usePastEvents, formatDate } from '../lib/content.js';
+import { usePage, useUpcomingEvents, usePastEvents, formatDate, eventTime } from '../lib/content.js';
 import { openNewsletter } from '../lib/lists.js';
 import Framed from './Framed.jsx';
 import mailClubImg from '../assets/shop-mail-club.jpg';
@@ -120,13 +124,13 @@ function PastEvent({ event }) {
 
 const PAST_SHOWN = 6;
 
-function EventTile({ event }) {
+export function EventTile({ event }) {
   const path = "/shop/events";
   return (
     <article className="event-tile" id={"event-" + event.id}>
       {event.image && <div className="event-tile-image"><Framed value={event.image} ratio="3/2" alt="" loading="lazy" /></div>}
       <div className="event-tile-text">
-        <p className="event-tile-date">{formatDate(event.date)}{event.time ? " · " + event.time : ""}</p>
+        <p className="event-tile-date">{formatDate(event.date)}{event.time ? " · " + eventTime(event) : ""}</p>
         <h3 className="event-tile-title">{event.title}</h3>
         {event.location && <p className="event-tile-place">{event.location}</p>}
         {event.description && <p className="event-tile-body">{event.description}</p>}

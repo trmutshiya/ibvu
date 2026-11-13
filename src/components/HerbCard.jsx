@@ -1,3 +1,6 @@
+// IBVU v6.09 — what changed in this file: a photo set to "Show the whole photo" keeps its
+// own shape in the corner (up to 64 px) instead of being cropped square.
+//
 // IBVU v6.06 — what changed in this file: a herb with an approved photo shows it as a
 // small square tile (about 64 × 64 px) in the card's top-right corner, framed as set in
 // admin → Herb photos. Herbs without a photo look as before.
@@ -11,12 +14,13 @@
 import { Link } from 'react-router-dom';
 import { herbKey, useHerbPhoto } from '../lib/content.js';
 import Framed from './Framed.jsx';
+import { parseImage } from '../lib/frame.js';
 
 export default function HerbCard({ herb, conditionId }) {
   const photo = useHerbPhoto(herb.name);
   return (
     <Link className={"herb-card" + (photo ? " has-photo" : "")} to={"/educate/hs/" + (herb.slug || herbKey(herb.name))} state={{ condition: conditionId || null }}>
-      {photo && <span className="herb-card-thumb"><Framed value={photo} ratio="1" alt="" loading="lazy" /></span>}
+      {photo && <span className={"herb-card-thumb" + (parseImage(photo).frame?.whole ? " whole" : "")}><Framed value={photo} ratio="1" alt="" loading="lazy" /></span>}
       <h3>{herb.name}</h3>
       <p className="latin">{herb.latinName}</p>
       <div className="tags">

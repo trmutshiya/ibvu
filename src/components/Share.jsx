@@ -1,8 +1,11 @@
+// IBVU v6.09 — what changed in this file: "Add to calendar" uses the real UK start time
+// (GMT or BST), so the event appears at the right time in any visitor's calendar.
+//
 // IBVU v5.6 — new file.
 // Share buttons (LinkedIn, WhatsApp, copy link) for articles and events, and
 // the "Add to calendar" link for events.
 import { useState } from 'react';
-import { pageUrl } from '../lib/content.js';
+import { pageUrl, ukMoment } from '../lib/content.js';
 
 export function shareLinks(path, text) {
   const url = pageUrl(path);
@@ -49,11 +52,11 @@ function calendarHref(event, path) {
   const esc = s => (s || "").replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\;");
   let start, end;
   if (event.time) {
-    const [h, m] = event.time.split(":").map(Number);
-    const pad = n => String(n).padStart(2, "0");
-    const endH = (h + 1) % 24;
-    start = "DTSTART:" + day + "T" + pad(h) + pad(m) + "00";
-    end = "DTEND:" + day + "T" + pad(endH) + pad(m) + "00";
+    const s = ukMoment(event.date, event.time).utc;
+    const e = new Date(s.getTime() + 3600000);
+    const z = x => x.toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
+    start = "DTSTART:" + z(s);
+    end = "DTEND:" + z(e);
   } else {
     const [y, mo, d] = event.date.split("-").map(Number);
     const next = new Date(y, mo - 1, d + 1);

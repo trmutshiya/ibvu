@@ -1,3 +1,11 @@
+// IBVU v6.10 — what changed in this file: a newsletter's cover is shown at its own width
+// (tile size, 340 px, unless changed in admin) and shrinks in proportion on a phone;
+// pictures in a newsletter keep their own widths the same way. markPictures (admin's
+// "Preview as web page") marks the pictures so they can be resized there.
+//
+// IBVU v6.09 — what changed in this file: an article, blog post or newsletter cover can
+// have a caption (set in admin); it is shown under the cover when the item is open.
+//
 // IBVU v6.06 — what changed in this file: the full-screen picture view (Lightbox) is
 // shared with the herb pages.
 //
@@ -33,7 +41,7 @@ import NotFound from './NotFound.jsx';
 import { ShareButtons } from './Share.jsx';
 import { useState, useEffect } from 'react';
 import Framed from './Framed.jsx';
-import { wholeSrc } from '../lib/frame.js';
+import { wholeSrc, captionOf, widthOf, shownWidth, TILE_W } from '../lib/frame.js';
 import { usePageTitle } from '../lib/site.js';
 import { useContent, usePublishedArticles, usePage, excerpt, formatDate, WRITING, sectionOf, articlePath } from '../lib/content.js';
 
@@ -45,6 +53,7 @@ function withCaptions(html) {
   doc.querySelectorAll("img[data-caption]").forEach(img => {
     const fig = doc.createElement("figure");
     fig.className = "article-figure";
+    fig.setAttribute("data-pic-box", "");
     ["data-size", "data-align"].forEach(a => { if (img.hasAttribute(a)) fig.setAttribute(a, img.getAttribute(a)); });
     if (img.style.width) { fig.style.width = img.style.width; img.style.width = ""; } // a dragged size belongs to the figure
     const cap = doc.createElement("figcaption");
@@ -72,10 +81,15 @@ export function Lightbox({ src, alt, onClose }) {
   );
 }
 
-export function ArticleView({ article, share = true }) {
+export function ArticleView({ article, share = true, markPictures = false }) {
   const clean = withCaptions(DOMPurify.sanitize(article.body || "", { ADD_ATTR: ["target"] }));
   const [big, setBig] = useState(null);
   const cover = wholeSrc(article.cover);
+  const coverCaption = captionOf(article.cover);
+  // newsletters: the cover at its own width (tile size unless changed)
+  const coverW = widthOf(article.cover) || (sectionOf(article) === "newsletter" ? TILE_W : 0);
+  const sizedBox = coverW ? { width: shownWidth(coverW), marginLeft: "auto", marginRight: "auto" } : undefined;
+  const mark = markPictures ? { "data-i": "cover" } : {};
   const openPicture = e => {
     const img = e.target.closest && e.target.closest("img");
     if (img) setBig({ src: img.currentSrc || img.src, alt: img.alt });
@@ -90,7 +104,9 @@ export function ArticleView({ article, share = true }) {
         <h1>{article.title || "Untitled"}</h1>
         {article.summary && <p className="article-summary">{article.summary}</p>}
       </header>
-      {cover && <button type="button" className="article-cover-btn" onClick={() => setBig({ src: cover, alt: "" })} aria-label="View the picture full size"><img className="article-cover" src={cover} alt="" /></button>}
+      {cover && (coverCaption
+        ? <figure className={"article-cover-figure" + (coverW ? " sized" : "")} style={sizedBox} data-pic-box=""><button type="button" className="article-cover-btn" onClick={() => setBig({ src: cover, alt: coverCaption })} aria-label="View the picture full size"><img className="article-cover" src={cover} alt="" {...mark} /></button><figcaption>{coverCaption}</figcaption></figure>
+        : <button type="button" className={"article-cover-btn" + (coverW ? " sized" : "")} style={sizedBox} data-pic-box="" onClick={() => setBig({ src: cover, alt: "" })} aria-label="View the picture full size"><img className="article-cover" src={cover} alt="" {...mark} /></button>)}
       <div className="article-body" onClick={openPicture} dangerouslySetInnerHTML={{ __html: clean }} />
       {big && <Lightbox src={big.src} alt={big.alt} onClose={() => setBig(null)} />}
       {share && article.status === "published" && <ShareButtons path={articlePath(article)} text={article.title} label={sectionOf(article) === "blog" ? "Share this post" : "Share this article"} />}

@@ -1,4 +1,15 @@
 /*
+  IBVU v6.10 — what changed in this file (at the end): newsletter pictures and covers keep their own width
+  (tile size to start), centred, smaller in proportion on a phone; the cover size box in Write; the size
+  shown in the picture bar.
+*/
+/*
+  IBVU v6.09 — what changed in this file (at the end): herb photos can show the whole photo; the cookie
+  bar is a smaller card with the buttons under the Cookie Policy link (same brown); event preview and
+  GMT/BST note; cover captions; the newsletter title box and missing-field highlight; picture size bar in
+  the email preview; Sending history table. Fix: a pressed admin button no longer goes blank under the mouse.
+*/
+/*
   IBVU v6.08 — what changed in this file since v6.07 (at the end): the cookie bar holds two short
   paragraphs and a Cookie Policy link; Privacy sections leave room for the header when opened by link.
 
@@ -1604,3 +1615,69 @@ a.admin-switch-brand:hover { color: #e2c878; }
 .cookie-actions { flex-wrap: wrap; }
 .cookie-btn { min-width: 118px; }
 .plain-page section[id] { scroll-margin-top: 90px; }
+
+/* ── v6.09: herb photos can show the whole photo (own shape, no cropping) ── */
+.herb-thumb.whole .herb-thumb-btn { width: auto; height: auto; max-width: 190px; display: inline-block; line-height: 0; }
+.herb-thumb.whole .herb-thumb-btn > img { width: auto; height: auto; max-width: 190px; max-height: 190px; object-fit: contain; }
+.herb-card-thumb.whole { width: auto; height: auto; line-height: 0; }
+.herb-card-thumb.whole > img { width: auto; height: auto; max-width: 64px; max-height: 64px; }
+@media (max-width: 640px) {
+  .herb-thumb.whole .herb-thumb-btn, .herb-thumb.whole .herb-thumb-btn > img { max-width: 110px; max-height: 110px; }
+  .herb-thumb.whole .herb-thumb-btn { height: auto; }
+}
+.frame-whole { margin: 4px 0 10px; }
+.frame-caption { margin-top: 14px; }
+.frame-caption input { width: 100%; }
+
+/* ── v6.09: smaller cookie card; buttons under the Cookie Policy link ── */
+.cookie-bar { display: block; left: 16px; right: auto; bottom: 16px; width: calc(100% - 32px); max-width: 420px; margin: 0; padding: 14px 16px 16px; }
+.cookie-text { font-size: 0.86rem; line-height: 1.45; }
+.cookie-text p { margin: 0 0 6px; }
+.cookie-text p.cookie-links { margin: 4px 0 0; }
+.cookie-actions { display: flex; flex-wrap: nowrap; gap: 8px; margin-top: 12px; width: 100%; }
+.cookie-btn { flex: 1; min-width: 0; padding: 9px 10px; font-size: 10.5px; }
+@media (max-width: 640px) { .cookie-bar { left: 10px; right: 10px; bottom: 10px; width: auto; max-width: none; padding: 12px 14px 14px; } .cookie-text { font-size: 0.84rem; } }
+
+/* ── v6.09: event preview and time zone note in admin ── */
+.ev-zone { margin: 6px 0 0; }
+.ev-preview { margin-top: 14px; padding: 18px; background: var(--cream); border: 1px dashed var(--cream-dark); }
+
+/* ── v6.09: cover captions ── */
+.article-cover-figure { margin: 0 0 40px; }
+.article-cover-figure .article-cover-btn { margin-bottom: 0; }
+.article-cover-figure figcaption { font-family: 'Crimson Pro', serif; font-size: 0.95rem; line-height: 1.5; color: var(--muted); text-align: center; margin-top: 10px; }
+.cadmin-image-caption { margin-top: 10px; }
+.cadmin-image-caption input { width: 100%; margin-top: 6px; }
+
+/* ── v6.09: newsletter title box, missing-field highlight, Write tab fix, picture sizes in the email preview ── */
+.cadmin-tabs .cadmin-btn.on, .cadmin-editor-bar .cadmin-tabs .cadmin-btn.on { background: var(--bark); color: var(--cream); border-color: var(--bark); }
+.nl-title-label { display: block; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--bark); margin: 0 0 8px; }
+.nl-title-label span { text-transform: none; letter-spacing: 0.3px; color: var(--muted); }
+.cadmin-title-input.nl-title-box { border: 1px solid #cfc3ad !important; background: white !important; padding: 10px 14px !important; border-radius: 2px; margin-bottom: 22px; font-size: clamp(1.4rem, 3.2vw, 1.9rem) !important; }
+.cadmin-title-input.nl-title-box:focus { border-color: var(--bark-light) !important; outline: none; }
+.cadmin-title-input.nl-title-box.nl-missing { border-color: #b03a3a !important; box-shadow: 0 0 0 3px rgba(176,58,58,0.15) !important; }
+.nl-missing, .cadmin-title-input.nl-missing { border-color: #b03a3a !important; box-shadow: 0 0 0 3px rgba(176,58,58,0.15); }
+fieldset.nl-missing, .nl-body.nl-missing { border: 1px solid #b03a3a; border-radius: 2px; padding: 8px; }
+.nl-picbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; padding: 10px 12px; background: var(--cream); border: 1px solid var(--cream-dark); position: sticky; top: 8px; z-index: 5; }
+.nl-picbar-label { font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 1px; color: var(--bark); margin-right: 6px; }
+.nl-pic-hint { margin: 0 0 10px; }
+.nl-history-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.92rem; }
+.nl-history-table th { text-align: left; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); font-weight: normal; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--cream-dark); }
+.nl-history-table td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--cream-dark); vertical-align: top; }
+@media (max-width: 640px) { .nl-history-table th:nth-child(2), .nl-history-table td:nth-child(2) { white-space: nowrap; } .nl-history-table { font-size: 0.85rem; } }
+/* v6.09 fix: a pressed ("on") button went dark-on-dark while the mouse was over it
+   (the hover colour won). It now stays readable. */
+.cadmin-btn.on:hover:not(:disabled), .cadmin-tabs .cadmin-btn.on:hover:not(:disabled) { background: var(--bark-light); border-color: var(--bark-light); color: var(--cream); }
+
+/* ── v6.10: newsletter pictures keep their own width (px of the 544 px email column),
+   smaller in proportion on a phone; resizing in admin's previews ── */
+.article-body img[data-px] { display: block; height: auto; margin-left: auto; margin-right: auto; float: none; }
+.article-figure:has(img[data-px]) { margin-left: auto; margin-right: auto; float: none; }
+.article-cover-btn.sized { display: block; margin-bottom: 40px; }
+.article-cover-btn.sized .article-cover, .article-cover-figure.sized .article-cover { width: 100%; max-height: none; margin: 0; }
+.article-cover-figure.sized .article-cover-btn { width: 100%; margin-bottom: 0; }
+.nl-cover-size { margin: 4px 0 20px; padding: 14px 14px 18px; background: var(--cream); border: 1px dashed var(--cream-dark); }
+.nl-cover-size .cadmin-hint { margin: 0 0 10px; }
+.nl-cover-size-col { max-width: 544px; margin: 0 auto; text-align: center; line-height: 0; }
+.nl-cover-size-col img { display: inline-block; height: auto; max-width: 100%; }
+.rte-imagebar-size { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--sage); margin: 0 6px; align-self: center; }

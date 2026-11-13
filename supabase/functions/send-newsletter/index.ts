@@ -1,3 +1,10 @@
+// v2 (website v6.10): every picture and the cover are shown at their own width in pixels
+// of the 544 px column (a cover with no width yet: tile size, 340 px) and shrink in
+// proportion on a phone (width="340" style="width:62.5%;max-width:340px").
+// (website v6.09): pictures in the email are centred at the size set in the editor,
+// with their caption underneath; the cover shows the whole picture (not its tile
+// framing) and its caption. Same layout as admin's "Preview as email".
+//
 // IBVU: send-newsletter (new with website v6.03, 13 Nov 2026).
 // A copy of the function to deploy in Supabase (Edge Functions). Changing this
 // file does not change the live function; it has to be deployed in Supabase.
@@ -105,9 +112,41 @@ function styleForEmail(html: string) {
     .replace(/<blockquote>/g, `<blockquote style="margin:18px 0;padding:4px 0 4px 16px;border-left:3px solid ${C.sage};color:${C.muted};font-style:italic">`)
     .replace(/<ul>/g, `<ul style="margin:0 0 16px 22px;padding:0;font-size:17px;line-height:1.65;color:${C.text}">`)
     .replace(/<ol>/g, `<ol style="margin:0 0 16px 22px;padding:0;font-size:17px;line-height:1.65;color:${C.text}">`)
-    .replace(/<img /g, `<img style="display:block;max-width:100%;height:auto;border:0;margin:8px 0 14px" `)
+    .replace(/<img\b[^>]*>/g, emailPicture)
     .replace(/<a /g, `<a style="color:${C.sage};text-decoration:underline" `)
     .replace(/<script[\s\S]*?<\/script>/gi, "");
+}
+function attr(tag: string, name: string) {
+  const m = tag.match(new RegExp("\\s" + name + "=\"([^\"]*)\"", "i"));
+  return m ? m[1] : "";
+}
+function sized(px: number) {
+  const w = Math.max(60, Math.min(544, Math.round(px)));
+  return { attr: ` width="${w}"`, style: `width:${(w / 544 * 100).toFixed(2)}%;max-width:${w}px` };
+}
+function emailPicture(tag: string) {
+  const src = attr(tag, "src"), alt = attr(tag, "alt"), caption = attr(tag, "data-caption");
+  const px = Number(attr(tag, "data-px")) || Number(attr(tag, "width")) || 544;
+  const s = sized(px);
+  return `<div style="text-align:center;margin:8px 0 18px"><img src="${src}" alt="${alt}"${s.attr} style="display:inline-block;${s.style};height:auto;border:0">`
+    + (caption ? `<p style="margin:8px auto 0;font-size:14px;line-height:1.5;color:${C.muted};text-align:center">${caption}</p>` : "")
+    + `</div>`;
+}
+// The cover as uploaded (its "#frame=…" framing is only for the website tile) and its caption.
+function coverParts(value: string) {
+  const text = String(value || "");
+  const at = text.lastIndexOf("#frame=");
+  if (at < 0) return { src: text, caption: "", width: 0 };
+  const rest = text.slice(at + 7).split("&").slice(1);
+  const get = (k: string) => { const p = rest.find(x => x.startsWith(k + "=")); try { return p ? decodeURIComponent(p.slice(k.length + 1)) : ""; } catch { return ""; } };
+  return { src: get("orig") || text.slice(0, at), caption: get("cap"), width: Math.round(Number(get("cw"))) || 0 };
+}
+function coverHtml(value: string) {
+  if (!value) return "";
+  const { src, caption, width } = coverParts(value);
+  const s = sized(width || 340);
+  return `<div style="text-align:center;margin:0 0 ${caption ? "8px" : "22px"}"><img src="${esc(src)}" alt=""${s.attr} style="display:inline-block;${s.style};height:auto;border:0"></div>`
+    + (caption ? `<p style="margin:0 0 22px;font-size:14px;line-height:1.5;color:${C.muted};text-align:center">${esc(caption)}</p>` : "");
 }
 function buildEmail(issue: any, viewUrl: string, unsubscribeUrl: string) {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(issue.title)}</title></head>
@@ -119,7 +158,7 @@ ${viewUrl ? `<tr><td style="padding:10px 28px;font-family:Arial,sans-serif;font-
 <tr><td align="center" style="padding:28px 28px 8px"><img src="${SITE}/email-logo.png" width="96" height="96" alt="IBVU" style="display:block;border:0"></td></tr>
 <tr><td style="padding:8px 28px 0;font-family:Georgia,serif">
 <h1 style="font-family:Georgia,serif;font-weight:normal;font-size:30px;line-height:1.25;color:${C.bark};margin:12px 0 18px;text-align:center">${esc(issue.title)}</h1>
-${issue.cover ? `<img src="${esc(issue.cover)}" alt="" width="544" style="display:block;width:100%;max-width:544px;height:auto;border:0;margin:0 0 22px">` : ""}
+${coverHtml(issue.cover)}
 ${styleForEmail(issue.body)}
 </td></tr>
 <tr><td style="padding:22px 28px 28px;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;color:${C.muted};border-top:1px solid ${C.line}">

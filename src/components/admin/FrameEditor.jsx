@@ -1,3 +1,11 @@
+// IBVU v6.09 — what changed in this file:
+// - allowWhole: a "Show the whole photo" tick box (herb photos). When ticked the
+//   box takes the photo's own shape, so nothing is cut off and there is no empty
+//   edge; moving and resizing are switched off. Saved as frame.whole.
+// - caption: when given, a "Caption (optional)" box sits under the picture, so a
+//   caption can be added straight after a picture is chosen. onSave also returns
+//   { caption }.
+//
 // IBVU v6.05 — what changed in this file since v6.04: the framing window now
 // works like the trial Tatenda approved (ibvu-picture-resize-trial-v2.html).
 // The gold box is the tile (or the chosen shape) and keeps its size. The
@@ -21,7 +29,8 @@ import { DEFAULT_FRAME, frameStyles, rotateImage, loadImage } from '../../lib/fr
 
 // One frame showing the picture as it will appear.
 export function FramePreview({ src, frame, ratio, className = "", ...rest }) {
-  const s = frameStyles(frame);
+  const s = frameStyles(frame && frame.whole ? null : frame);
+  if (frame && frame.whole) s.img = { ...s.img, objectFit: "contain" };
   return (
     <div className={"frame-box " + className} style={{ aspectRatio: String(ratio) }} {...rest}>
       <span style={{ ...s.outer, width: "100%", height: "100%" }}>
@@ -54,8 +63,11 @@ function toFrame(p, W, H, nat) {
 // shapes: [{ label, ratio }]. The first is the main one.
 // chooseShape: let the person pick the shape (pictures inside the text).
 // onSave({ frame, rotatedFile, ratio, shape }) — shape is "original" when the picture keeps its own shape
-export default function FrameEditor({ src, frame: initial, shapes, chooseShape = false, title = "Frame the picture", onSave, onCancel, busy = false }) {
-  const [frame, setFrame] = useState({ ...DEFAULT_FRAME, ...(initial || {}) });
+export default function FrameEditor({ src, frame: initial, shapes, chooseShape = false, title = "Frame the picture", onSave, onCancel, busy = false, allowWhole = false, caption: initialCaption }) {
+  const [frame, setFrame] = useState(() => { const { whole: _w, ...f } = { ...DEFAULT_FRAME, ...(initial || {}) }; return f; }); // eslint-disable-line no-unused-vars
+  const [whole, setWhole] = useState(!!(initial && initial.whole));
+  const [caption, setCaption] = useState(initialCaption || "");
+  const withCaption = initialCaption !== undefined;
   const [shown, setShown] = useState(src);          // the picture being framed (changes after turning)
   const [rotatedFile, setRotatedFile] = useState(null);
   const [ratio, setRatio] = useState(shapes[0].ratio);
@@ -82,14 +94,15 @@ export default function FrameEditor({ src, frame: initial, shapes, chooseShape =
     return () => window.removeEventListener("resize", measure);
   }, []);
 
-  const shapeRatio = ratio === "original" ? (nat || 1.5) : ratio;
+  const shapeRatio = whole || ratio === "original" ? (nat || 1.5) : ratio;
   // the box: about 60% of the dark area's width, at most 260 px high
   const stageH = stageW < 480 ? 300 : 360;
   let W = Math.min(380, stageW * 0.62), H = W / shapeRatio;
   if (H > stageH - 110) { H = stageH - 110; W = H * shapeRatio; }
   const boxL = (stageW - W) / 2, boxT = (stageH - H) / 2;
   const ready = !!nat && stageW > 0;
-  const pos = ready ? toPos(frame, W, H, nat) : { l: 0, t: 0, w: 0 };
+  const shownFrame = whole ? DEFAULT_FRAME : frame;
+  const pos = ready ? toPos(shownFrame, W, H, nat) : { l: 0, t: 0, w: 0 };
   const picH = ready ? pos.w / nat : 0;
 
   const setFromPos = useCallback(p => setFrame(toFrame(p, W, H, nat)), [W, H, nat]);
@@ -100,14 +113,14 @@ export default function FrameEditor({ src, frame: initial, shapes, chooseShape =
 
   // move: drag the picture inside the box
   function startMove(e) {
-    if (!ready) return;
+    if (!ready || whole) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     drag.current = { mode: "move", x: e.clientX, y: e.clientY, p: pos };
   }
   // resize: drag a corner; the opposite corner stays put
   function startResize(e, k) {
-    if (!ready) return;
+    if (!ready || whole) return;
     e.preventDefault(); e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     drag.current = { mode: "resize", k, x: e.clientX, y: e.clientY, p: pos, h: picH, sx: k.includes("r") ? 1 : -1, sy: k.includes("b") ? 1 : -1 };
@@ -122,6 +135,7 @@ export default function FrameEditor({ src, frame: initial, shapes, chooseShape =
   }
   function endDrag() { drag.current = null; }
   function onKeyDown(e) {
+    if (whole) return;
     const step = e.shiftKey ? 20 : 5;
     const m = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
     if (m) { e.preventDefault(); setFromPos({ ...pos, l: pos.l + m[0], t: pos.t + m[1] }); }
@@ -141,7 +155,7 @@ export default function FrameEditor({ src, frame: initial, shapes, chooseShape =
   }
 
   const others = chooseShape ? [] : shapes.slice(1);
-  const pct = Math.round(frame.z * 100);
+  const pct = Math.round(shownFrame.z * 100);
   // corner handles: on the picture's corners, kept inside the dark area
   const corner = (x, y) => ({ left: clamp(x, 10, stageW - 10), top: clamp(y, 10, stageH - 10) });
   const L = boxL + pos.l, T = boxT + pos.t, R = L + pos.w, B = T + picH;
@@ -163,7 +177,14 @@ export default function FrameEditor({ src, frame: initial, shapes, chooseShape =
           </div>
         )}
 
-        <p className="cadmin-hint frame-hint">The gold box is {chooseShape ? "the picture's shape" : "the " + shapes[0].label.toLowerCase()} and keeps its size. <strong>Drag the picture</strong> to move it; <strong>drag a corner</strong> to make it larger or smaller. The faint part outside the box will not show.</p>
+        {allowWhole && (
+          <label className="cadmin-check frame-whole">
+            <input type="checkbox" checked={whole} onChange={e => setWhole(e.target.checked)} />
+            Show the whole photo (nothing cut off: the tile takes the photo's own shape)
+          </label>
+        )}
+        {whole ? <p className="cadmin-hint frame-hint">The whole photo is shown, in its own shape, at the size of the tile. Untick the box to crop it into the square tile instead.</p> :
+        <p className="cadmin-hint frame-hint">The gold box is {chooseShape ? "the picture's shape" : "the " + shapes[0].label.toLowerCase()} and keeps its size. <strong>Drag the picture</strong> to move it; <strong>drag a corner</strong> to make it larger or smaller. The faint part outside the box will not show.</p>}
 
         <div className="frame-stage" ref={stageRef} style={{ height: stageH }} onPointerMove={onMove} onPointerUp={endDrag} onPointerCancel={endDrag}>
           {ready && (
@@ -177,22 +198,22 @@ export default function FrameEditor({ src, frame: initial, shapes, chooseShape =
                 </div>
               </div>
               <span className="frame-outline" style={{ left: L, top: T, width: pos.w, height: picH }} />
-              {Object.entries(handles).map(([k, at]) => (
+              {!whole && Object.entries(handles).map(([k, at]) => (
                 <span key={k} className={"frame-handle " + k} style={at} onPointerDown={e => startResize(e, k)} aria-hidden="true" />
               ))}
-              <span className="frame-size">Size {pct}%{pct <= 100 ? " (just fills the box)" : ""}</span>
+              <span className="frame-size">{whole ? "The whole photo" : "Size " + pct + "%" + (pct <= 100 ? " (just fills the box)" : "")}</span>
             </>
           )}
           {!ready && <p className="frame-loading">Loading the picture…</p>}
         </div>
 
         <div className="frame-row frame-buttons">
-          <button type="button" className="cadmin-btn" disabled={!ready || frame.z <= 1} onClick={() => zoomBy(1 / 1.1)}>− Smaller</button>
-          <button type="button" className="cadmin-btn" disabled={!ready || frame.z >= MAX_ZOOM} onClick={() => zoomBy(1.1)}>Larger +</button>
-          <button type="button" className="cadmin-btn" disabled={!ready} onClick={() => setFrame(f => ({ ...f, x: 50, y: 50 }))}>Centre it</button>
+          <button type="button" className="cadmin-btn" disabled={!ready || whole || frame.z <= 1} onClick={() => zoomBy(1 / 1.1)}>− Smaller</button>
+          <button type="button" className="cadmin-btn" disabled={!ready || whole || frame.z >= MAX_ZOOM} onClick={() => zoomBy(1.1)}>Larger +</button>
+          <button type="button" className="cadmin-btn" disabled={!ready || whole} onClick={() => setFrame(f => ({ ...f, x: 50, y: 50 }))}>Centre it</button>
           <button type="button" className="cadmin-btn" disabled={!!working} onClick={() => rotate(false)}>↺ Turn left</button>
           <button type="button" className="cadmin-btn" disabled={!!working} onClick={() => rotate(true)}>↻ Turn right</button>
-          <button type="button" className="cadmin-btn" onClick={() => { setFrame({ ...DEFAULT_FRAME }); setShown(src); setRotatedFile(null); }}>Reset</button>
+          <button type="button" className="cadmin-btn" onClick={() => { setFrame({ ...DEFAULT_FRAME }); setShown(src); setRotatedFile(null); setWhole(false); }}>Reset</button>
         </div>
 
         {!chooseShape && ready && (
@@ -200,18 +221,24 @@ export default function FrameEditor({ src, frame: initial, shapes, chooseShape =
             <p className="cadmin-hint">How it will look:</p>
             <div className="frame-others-list">
               {[shapes[0], ...others].map(s => (
-                <figure key={s.label}><FramePreview src={shown} frame={frame} ratio={s.ratio} /><figcaption>{s.label}</figcaption></figure>
+                <figure key={s.label}><FramePreview src={shown} frame={shownFrame} ratio={whole ? shapeRatio : s.ratio} /><figcaption>{s.label}</figcaption></figure>
               ))}
-              <figure className="frame-phone"><FramePreview src={shown} frame={frame} ratio={shapes[0].ratio} /><figcaption>Small</figcaption></figure>
+              <figure className="frame-phone"><FramePreview src={shown} frame={shownFrame} ratio={whole ? shapeRatio : shapes[0].ratio} /><figcaption>Small</figcaption></figure>
             </div>
           </div>
         )}
 
+        {withCaption && (
+          <div className="cadmin-field frame-caption">
+            <label htmlFor="frame-caption">Caption (optional, shown under the picture)</label>
+            <input id="frame-caption" value={caption} maxLength={200} placeholder="For example: Aloe vera growing in Harare" onChange={e => setCaption(e.target.value)} />
+          </div>
+        )}
         {working && <p className="cadmin-hint" role="status">{working}</p>}
         {problem && <p className="cadmin-problem" role="alert">{problem}</p>}
         <div className="frame-foot">
           <button type="button" className="cadmin-btn" onClick={onCancel}>Cancel</button>
-          <button type="button" className="cadmin-btn solid" disabled={busy || !!working || !ready} onClick={() => onSave({ frame, rotatedFile, ratio: shapeRatio, shape: ratio })}>{busy ? "Saving…" : "Save"}</button>
+          <button type="button" className="cadmin-btn solid" disabled={busy || !!working || !ready} onClick={() => onSave({ frame: whole ? { ...DEFAULT_FRAME, whole: true } : frame, rotatedFile, ratio: shapeRatio, shape: whole ? "original" : ratio, caption: caption.trim() })}>{busy ? "Saving…" : "Save"}</button>
         </div>
       </div>
     </div>

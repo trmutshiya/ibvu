@@ -1,3 +1,26 @@
+// IBVU v6.10 — what changed in this file (as in the approved trial,
+// ibvu-newsletter-pictures-trial-v2.html):
+// - Every picture, the cover too, starts at tile size: it fits inside a 340 × 227 px
+//   tile in its own shape. Sizes are pixels of the 544 px email column.
+// - Any picture can be made smaller or larger by dragging a corner in Write (pictures
+//   in the text, and the cover shown under "Cover image"), in Preview as email and in
+//   Preview as web page. A bar gives − Smaller, Larger +, Tile size and Full width.
+//   The size is shared by the email, the web page and Write.
+// - On a phone every picture shows smaller in proportion.
+//
+// IBVU v6.09 — what changed in this file:
+// - The title is a clearly labelled box ("Newsletter title"), not grey heading text.
+// - When something is missing before a test, schedule or send, the message says what,
+//   the Write view opens and that box is highlighted and selected.
+// - Fix: the "Write" view button went dark text on a dark background while the mouse was over it (it looked blank). Fixed for every pressed button in admin (index.css).
+// - Preview as email: click a picture to make it smaller or larger (or Small, Medium,
+//   Large, Full width) while looking at the email. The same size shows in Write.
+// - Pictures in the email are centred, at the size set, with their caption underneath;
+//   the cover's caption shows under the cover.
+// - New "Sending history" tab (Owners): every email address and every newsletter sent
+//   to it, when, and whether it was delivered to the email service; search, "only
+//   problems", and a spreadsheet download. Uses the record kept since v6.03.
+//
 // IBVU v6.04 — what changed in this file: the cover picture can be framed for
 // its tile on ibvu.org/newsletter. The email and the open issue show the whole
 // picture, as an article does.
@@ -37,6 +60,8 @@ import { sbFetchApproved, sbFetchStaticHerbs } from '../../lib/supabase.js';
 import { ArticleView } from '../Media.jsx';
 import { DeleteButton, ImageField, SHAPES } from './bits.jsx';
 import emailLogo from '../../assets/email-logo.png';
+import { widthOf, withWidth, wholeSrc, tileWidth, shownWidth, loadImage, TILE_W, EMAIL_COLUMN } from '../../lib/frame.js';
+import { attachPictureResize, innerWidth } from './pictureResize.js';
 
 const RichEditor = lazy(() => import('./RichEditor.jsx'));
 
@@ -182,8 +207,70 @@ function AddFromSite({ editorRef }) {
   );
 }
 
-function EmailPreview({ issue }) {
+// v6.10: picture sizes are pixels of the 544 px email column (data-px), shown as
+// min(px, share of the column) so a phone shows them smaller in proportion.
+function numberPictures(html) { let k = 0; return String(html || "").replace(/<img\b/g, () => '<img data-i="' + (k++) + '"'); }
+function parseBody(html) { return new DOMParser().parseFromString("<div id='r'>" + (html || "") + "</div>", "text/html"); }
+function bodyPictureWidth(html, index) {
+  const img = parseBody(html).querySelectorAll("#r img")[index];
+  if (!img) return EMAIL_COLUMN;
+  return Number(img.getAttribute("data-px")) || Number(img.getAttribute("width")) || EMAIL_COLUMN;
+}
+// Sets the width (px) of the index-th picture in the newsletter's text.
+export function resizePicture(html, index, px) {
+  const doc = parseBody(html);
+  const img = doc.querySelectorAll("#r img")[index];
+  if (!img) return html;
+  const w = Math.round(Math.max(100, Math.min(EMAIL_COLUMN, px)));
+  img.setAttribute("data-px", String(w));
+  img.setAttribute("data-w", String(Math.round(w / EMAIL_COLUMN * 10000) / 100));
+  img.setAttribute("width", String(w));
+  img.setAttribute("style", "width:" + shownWidth(w));
+  img.removeAttribute("data-size"); img.removeAttribute("data-align");
+  return doc.getElementById("r").innerHTML;
+}
+
+// The bar for the chosen picture: the cover, or a picture in the text.
+function PictureSizeBar({ picked, px, onSize, onDone }) {
+  const tile = tileWidth(picked.ratio);
+  const name = picked.key === "cover" ? "Cover" : "Picture " + (Number(picked.key) + 1);
+  return (
+    <div className="nl-picbar" role="toolbar" aria-label="Picture size">
+      <span className="nl-picbar-label">{name}: {px} px wide{px === tile ? " · tile size" : px >= EMAIL_COLUMN ? " · full width" : ""}</span>
+      <button type="button" className="cadmin-btn" disabled={px <= 100} onClick={() => onSize(px - 20)}>− Smaller</button>
+      <button type="button" className="cadmin-btn" disabled={px >= EMAIL_COLUMN} onClick={() => onSize(px + 20)}>Larger +</button>
+      <button type="button" className={"cadmin-btn" + (px === tile ? " on" : "")} aria-pressed={px === tile} onClick={() => onSize(tile)}>Tile size</button>
+      <button type="button" className={"cadmin-btn" + (px >= EMAIL_COLUMN ? " on" : "")} aria-pressed={px >= EMAIL_COLUMN} onClick={() => onSize(EMAIL_COLUMN)}>Full width</button>
+      <button type="button" className="cadmin-btn" onClick={onDone}>Done</button>
+    </div>
+  );
+}
+
+// sizing (admin, while writing): { picked, pick(key, ratio), widthOf(key), resize(key, px) }
+function useResizable(root, sizing, columnOf, deps) {
+  useEffect(() => {
+    if (!sizing || !root) return undefined;
+    return attachPictureResize(root, {
+      picked: sizing.picked ? sizing.picked.key : null,
+      columnWidth: columnOf, widthOf: sizing.widthOf, onPick: sizing.pick, onResize: sizing.resize,
+    });
+  }, [root, sizing && sizing.picked && sizing.picked.key, ...deps]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+function EmailPreview({ issue, sizing = null }) {
   const viewUrl = issue.showOnSite && issue.slug ? SITE_URL + "/newsletter/" + issue.slug : "";
+  const [doc, setDoc] = useState(null);
+  const html = buildNewsletterEmail({ ...issue, body: sizing ? numberPictures(issue.body) : issue.body },
+    { viewUrl, unsubscribeUrl: "#", logoUrl: emailLogo, markPictures: !!sizing });
+  useResizable(doc, sizing, img => innerWidth(img.closest("td")), []);
+
+  function onLoad(e) {
+    try {
+      const d = e.target.contentDocument;
+      e.target.style.height = Math.max(400, d.documentElement.scrollHeight + 4) + "px";
+      setDoc(d);
+    } catch { /* keep the set height */ }
+  }
   return (
     <div className="nl-email">
       <div className="nl-inbox">
@@ -191,11 +278,29 @@ function EmailPreview({ issue }) {
         <span className="nl-inbox-subject">{issue.subject || <em>No subject line yet</em>}</span>
         {issue.previewText && <span className="nl-inbox-preview"> – {issue.previewText}</span>}
       </div>
-      {/* No scripts can run in the preview; it is only allowed to report its height. */}
-      <iframe className="nl-email-frame" title="How the email will look" sandbox="allow-same-origin"
-        srcDoc={buildNewsletterEmail(issue, { viewUrl, unsubscribeUrl: "#", logoUrl: emailLogo })}
-        onLoad={e => { try { const doc = e.target.contentDocument; e.target.style.height = Math.max(400, doc.documentElement.scrollHeight + 4) + "px"; } catch { /* keep the set height */ } }} />
+      {/* No scripts can run in the preview; admin only adds the picture handles. */}
+      <iframe className="nl-email-frame" title="How the email will look" sandbox="allow-same-origin" srcDoc={html} onLoad={onLoad} />
       <p className="cadmin-hint">Email programs differ a little: this is close to how Gmail and Apple Mail show it. Send a test to see it in your own inbox.</p>
+    </div>
+  );
+}
+
+function WebPreview({ issue, sizing = null }) {
+  const [root, setRoot] = useState(null);
+  const article = issueAsArticle({ ...issue, body: sizing ? numberPictures(issue.body) : issue.body, sentAt: issue.sentAt || new Date().toISOString() });
+  useResizable(root, sizing, img => innerWidth(img.closest(".article")), [issue.body, issue.cover]);
+  return <div className="cadmin-preview nl-web" ref={setRoot}><ArticleView article={article} share={false} markPictures={!!sizing} /></div>;
+}
+
+// Write: the cover as it will appear in the email, to resize it there too.
+function CoverSize({ cover, sizing }) {
+  const [root, setRoot] = useState(null);
+  useResizable(root, sizing, () => innerWidth(root), [cover]);
+  const px = widthOf(cover) || TILE_W;
+  return (
+    <div className="nl-cover-size" ref={setRoot}>
+      <p className="cadmin-hint">The cover in the email: {px} px wide{px === TILE_W ? " (tile size)" : ""}. Click it to make it smaller or larger.</p>
+      <div className="nl-cover-size-col"><img data-i="cover" src={wholeSrc(cover)} alt="Cover" style={{ width: shownWidth(px) }} /></div>
     </div>
   );
 }
@@ -219,6 +324,8 @@ function IssueEditor({ initial, role, onBack, onError }) {
   const [saveState, setSaveState] = useState(initial.id ? "saved" : "new");
   const [view, setView] = useState("write"); // write | email | page
   const [problem, setProblem] = useState("");
+  const [badField, setBadField] = useState(""); // the box that needs filling in
+  const [picked, setPicked] = useState(null); // v6.10: { key: "cover" | "0" | "1"…, ratio } the picture being resized
   const [notice, setNotice] = useState("");
   const [asking, setAsking] = useState(""); // "" | "send" | "schedule"
   const [when, setWhen] = useState(live && live.sendAt ? isoToUKInput(live.sendAt) : tomorrowNine());
@@ -228,7 +335,24 @@ function IssueEditor({ initial, role, onBack, onError }) {
   const shown = locked && live ? live : n;
   const who = audience(shown.lists || [], counts);
 
-  function change(patch) { if (locked) return; setN(v => ({ ...v, ...patch })); setSaveState("unsaved"); setProblem(""); }
+  function change(patch) { if (locked) return; setN(v => ({ ...v, ...patch })); setSaveState("unsaved"); setProblem(""); setBadField(""); }
+
+  // v6.10: picture sizes (px of the 544 px email column)
+  const pxOfKey = key => key === "cover" ? (widthOf(latest.current.cover) || TILE_W) : bodyPictureWidth(latest.current.body, Number(key));
+  function resize(key, px) {
+    const c = latest.current, w = Math.round(Math.max(100, Math.min(EMAIL_COLUMN, px)));
+    if (key === "cover") change({ cover: withWidth(c.cover, w) });
+    else change({ body: resizePicture(c.body, Number(key), w) });
+  }
+  const sizing = locked ? null : { picked, pick: (key, ratio) => setPicked({ key, ratio }), widthOf: pxOfKey, resize };
+  const show = v => { setPicked(null); setView(v); };
+  // A new cover starts at tile size (in its own shape).
+  useEffect(() => {
+    if (locked || !n.cover || widthOf(n.cover)) return;
+    let gone = false;
+    loadImage(wholeSrc(n.cover)).then(img => { if (!gone && latest.current.cover === n.cover) change({ cover: withWidth(n.cover, tileWidth(img.naturalWidth / img.naturalHeight)) }); }).catch(() => {});
+    return () => { gone = true; };
+  }, [n.cover]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function persist(quiet) {
     const c = latest.current;
@@ -247,13 +371,28 @@ function IssueEditor({ initial, role, onBack, onError }) {
   }, [n, saveState, locked]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function missing() {
-    if (!n.title.trim()) return "Give the newsletter a title.";
-    if (!n.subject.trim()) return "Add the email subject line.";
-    if (!plainText(n.body).trim() && !/<img/.test(n.body || "")) return "Write something in the newsletter first.";
-    if (!n.lists.length) return "Choose at least one list to send it to.";
-    return "";
+    if (!n.title.trim()) return { text: "Add the newsletter title: the box marked “Newsletter title” at the top of Write.", field: "title" };
+    if (!n.subject.trim()) return { text: "Add the email subject line (what people see in their inbox).", field: "subject" };
+    if (!plainText(n.body).trim() && !/<img/.test(n.body || "")) return { text: "Write something in the newsletter first.", field: "body" };
+    if (!n.lists.length) return { text: "Choose at least one list to send it to (under “Send to”).", field: "lists" };
+    return null;
   }
-  function check() { const m = missing(); setProblem(m); return !m; }
+  // Shows what is missing and takes you to it.
+  function check() {
+    const m = missing();
+    setProblem(m ? m.text : ""); setBadField(m ? m.field : "");
+    if (m) {
+      setView("write");
+      setTimeout(() => {
+        const el = m.field === "title" ? document.getElementById("nl-title")
+          : m.field === "subject" ? document.getElementById("nl-subject")
+          : m.field === "lists" ? document.querySelector(".nl-lists input")
+          : document.querySelector(".nl-body .ProseMirror");
+        if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); el.focus({ preventScroll: true }); }
+      }, 60);
+    }
+    return !m;
+  }
 
   async function test() {
     if (!check()) return;
@@ -303,9 +442,9 @@ function IssueEditor({ initial, role, onBack, onError }) {
         {!locked && <span className="cadmin-save-state" aria-live="polite">{saveLabel}</span>}
         <span className="cadmin-spacer" />
         <div className="cadmin-tabs" role="group" aria-label="View">
-          <button type="button" className={"cadmin-btn" + (view === "write" ? " on" : "")} aria-pressed={view === "write"} disabled={locked} onClick={() => setView("write")}>Write</button>
-          <button type="button" className={"cadmin-btn" + (view === "email" ? " on" : "")} aria-pressed={view === "email"} onClick={() => setView("email")}>Preview as email</button>
-          <button type="button" className={"cadmin-btn" + (view === "page" ? " on" : "")} aria-pressed={view === "page"} onClick={() => setView("page")}>Preview as web page</button>
+          <button type="button" className={"cadmin-btn" + (view === "write" ? " on" : "")} aria-pressed={view === "write"} disabled={locked} onClick={() => show("write")}>Write</button>
+          <button type="button" className={"cadmin-btn" + (view === "email" ? " on" : "")} aria-pressed={view === "email"} onClick={() => show("email")}>Preview as email</button>
+          <button type="button" className={"cadmin-btn" + (view === "page" ? " on" : "")} aria-pressed={view === "page"} onClick={() => show("page")}>Preview as web page</button>
         </div>
       </div>
 
@@ -351,18 +490,22 @@ function IssueEditor({ initial, role, onBack, onError }) {
         </div>
       )}
 
-      {view === "email" ? <EmailPreview issue={shown} /> :
-       view === "page" ? <div className="cadmin-preview"><ArticleView article={issueAsArticle({ ...shown, sentAt: shown.sentAt || new Date().toISOString() })} share={false} /></div> :
+      {sizing && picked && (view !== "write" || picked.key === "cover") && (
+        <PictureSizeBar picked={picked} px={pxOfKey(picked.key)} onSize={px => resize(picked.key, px)} onDone={() => setPicked(null)} />
+      )}
+      {sizing && !picked && view !== "write" && (shown.cover || /<img/.test(shown.body || "")) && <p className="cadmin-hint nl-pic-hint">Click any picture to make it smaller or larger, or drag its corners.</p>}
+      {view === "email" ? <EmailPreview issue={shown} sizing={sizing} /> :
+       view === "page" ? <WebPreview issue={shown} sizing={sizing} /> :
        locked ? <EmailPreview issue={shown} /> : (
         <div className="cadmin-writing">
-          <label className="visually-hidden" htmlFor="nl-title">Title</label>
-          <textarea id="nl-title" className="cadmin-title-input" rows="1" placeholder="Newsletter title" value={n.title}
+          <label className="nl-title-label" htmlFor="nl-title">Newsletter title <span>(shown at the top of the email and on the website)</span></label>
+          <textarea id="nl-title" className={"cadmin-title-input nl-title-box" + (badField === "title" ? " nl-missing" : "")} rows="1" placeholder="For example: IBVU News, December 2026" value={n.title}
             onChange={e => change({ title: e.target.value.replace(/\n/g, " ") })}
             onInput={e => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }} />
           <div className="cadmin-grid2">
-            <div className="cadmin-field wide"><label htmlFor="nl-subject">Email subject line (what people see in their inbox)</label><input id="nl-subject" value={n.subject} maxLength={150} onChange={e => change({ subject: e.target.value })} /></div>
+            <div className="cadmin-field wide"><label htmlFor="nl-subject">Email subject line (what people see in their inbox)</label><input id="nl-subject" className={badField === "subject" ? "nl-missing" : ""} value={n.subject} maxLength={150} onChange={e => change({ subject: e.target.value })} /></div>
             <div className="cadmin-field wide"><label htmlFor="nl-preview">Preview line (the grey text shown after the subject in most inboxes; also the summary on the website)</label><input id="nl-preview" value={n.previewText} maxLength={200} onChange={e => change({ previewText: e.target.value })} /></div>
-            <fieldset className="cadmin-field nl-lists">
+            <fieldset className={"cadmin-field nl-lists" + (badField === "lists" ? " nl-missing" : "")}>
               <legend>Send to</legend>
               {MAILING_LISTS.map(l => (
                 <label className="cadmin-check" key={l.key}>
@@ -375,12 +518,15 @@ function IssueEditor({ initial, role, onBack, onError }) {
                 Show on the website once sent (ibvu.org/newsletter)
               </label>
             </fieldset>
-            <div className="cadmin-field"><label>Cover image (optional)</label><ImageField value={n.cover} label="Cover image" folder="newsletters" shapes={[SHAPES.tile]} hint="Framing sets the tile on ibvu.org/newsletter. The email and the open issue show the whole picture." onChange={cover => change({ cover })} onError={onError} /></div>
+            <div className="cadmin-field"><label>Cover image (optional)</label><ImageField value={n.cover} label="Cover image" folder="newsletters" shapes={[SHAPES.tile]} withCaption hint="Framing sets the tile on ibvu.org/newsletter. The email and the open issue show the whole picture." onChange={cover => change({ cover })} onError={onError} /></div>
           </div>
+          {n.cover && <CoverSize cover={n.cover} sizing={sizing} />}
           <AddFromSite editorRef={editorRef} />
-          <Suspense fallback={<p className="cadmin-hint">Loading the editor…</p>}>
-            <RichEditor value={n.body} placeholder="Write the newsletter…" onChange={body => change({ body })} onError={onError} onReady={ed => { editorRef.current = ed; }} />
-          </Suspense>
+          <div className={"nl-body" + (badField === "body" ? " nl-missing" : "")}>
+            <Suspense fallback={<p className="cadmin-hint">Loading the editor…</p>}>
+              <RichEditor tileMode value={n.body} placeholder="Write the newsletter…" onChange={body => change({ body })} onError={onError} onReady={ed => { editorRef.current = ed; }} />
+            </Suspense>
+          </div>
         </div>
       )}
     </div>
@@ -537,6 +683,74 @@ function RemindersAdmin({ onError }) {
 
 /* ── the section ─────────────────────────────────────────────────────── */
 
+/* ── v6.09: sending history (what was sent to each address) ─────────── */
+
+const cell = v => { const s = String(v == null ? "" : v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+function downloadHistory(rows) {
+  const head = ["email", "newsletter", "subject", "sent_uk_time", "result", "problem"];
+  const lines = [head.join(",")].concat(rows.map(r => [r.email, r.title, r.subject, ukText(r.sentAt), r.status === "sent" ? "sent" : "not sent", r.error].map(cell).join(",")));
+  const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "ibvu-sending-history-" + new Date().toISOString().slice(0, 10) + ".csv";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+function SendingHistory() {
+  const { newsletters, newsletterSends } = useContent();
+  const [query, setQuery] = useState("");
+  const [onlyProblems, setOnlyProblems] = useState(false);
+  const byId = Object.fromEntries(newsletters.map(n => [n.id, n]));
+  const rows = newsletterSends
+    .map(s => ({ ...s, title: (byId[s.issueId] && byId[s.issueId].title) || "(deleted newsletter)", subject: (byId[s.issueId] && byId[s.issueId].subject) || "" }))
+    .sort((a, b) => a.email.localeCompare(b.email) || (b.sentAt || "").localeCompare(a.sentAt || ""));
+  const q = query.trim().toLowerCase();
+  const shown = rows.filter(r => (!onlyProblems || r.status !== "sent") && (!q || r.email.includes(q) || r.title.toLowerCase().includes(q)));
+  const people = [];
+  for (const r of shown) {
+    const last = people[people.length - 1];
+    if (last && last.email === r.email) last.rows.push(r); else people.push({ email: r.email, rows: [r] });
+  }
+  const addresses = new Set(rows.map(r => r.email)).size;
+  return (
+    <div className="nl-history">
+      <p className="cadmin-hint">Every newsletter sent from here, to every address: when it went and whether the email service accepted it. Tests sent to yourself are not included. {rows.length ? rows.length + " emails to " + addresses + (addresses === 1 ? " address" : " addresses") + "." : ""}</p>
+      <div className="cadmin-filter">
+        <label className="visually-hidden" htmlFor="nh-search">Search</label>
+        <input id="nh-search" type="text" placeholder="Search by email address or newsletter…" value={query} onChange={e => setQuery(e.target.value)} />
+        <label className="cadmin-check"><input type="checkbox" checked={onlyProblems} onChange={e => setOnlyProblems(e.target.checked)} /> Only emails that were not sent</label>
+      </div>
+      <div className="cadmin-row">
+        <button type="button" className="cadmin-btn solid" disabled={!shown.length} onClick={() => downloadHistory(shown)}>Download as spreadsheet ({shown.length})</button>
+      </div>
+      {rows.length === 0 && <p className="cadmin-empty">No newsletters have been sent yet. Once one is sent, every address it went to is listed here.</p>}
+      {rows.length > 0 && shown.length === 0 && <p className="cadmin-empty">Nothing matches.</p>}
+      <div className="cadmin-list">
+        {people.map(p => (
+          <div className="cadmin-item nl-history-person" key={p.email}>
+            <div className="cadmin-item-main">
+              <p className="cadmin-item-title">{p.email} <span className="cadmin-item-meta">({p.rows.length} {p.rows.length === 1 ? "newsletter" : "newsletters"})</span></p>
+              <table className="nl-history-table">
+                <thead><tr><th>Newsletter</th><th>Sent (UK time)</th><th>Result</th></tr></thead>
+                <tbody>
+                  {p.rows.map(r => (
+                    <tr key={r.issueId}>
+                      <td>{r.title}</td>
+                      <td>{ukText(r.sentAt)}</td>
+                      <td>{r.status === "sent" ? <span className="cadmin-badge live">Sent</span> : <span className="cadmin-badge draft" title={r.error}>Not sent{r.error ? ": " + r.error : ""}</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function NewslettersAdmin({ role, onError }) {
   const { newsletters, newsletterReady } = useContent();
   const [tab, setTab] = useState("issues");
@@ -559,6 +773,7 @@ export default function NewslettersAdmin({ role, onError }) {
       {owner && (
         <div className="cadmin-tabs nl-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={tab === "issues"} className={"cadmin-btn" + (tab === "issues" ? " on" : "")} onClick={() => setTab("issues")}>Newsletters</button>
+          <button type="button" role="tab" aria-selected={tab === "history"} className={"cadmin-btn" + (tab === "history" ? " on" : "")} onClick={() => setTab("history")}>Sending history</button>
           <button type="button" role="tab" aria-selected={tab === "reminders"} className={"cadmin-btn" + (tab === "reminders" ? " on" : "")} onClick={() => setTab("reminders")}>Reminders</button>
         </div>
       )}
@@ -566,7 +781,7 @@ export default function NewslettersAdmin({ role, onError }) {
         <p className="cadmin-note">The newsletter part of the database is not set up yet (database step 2). Until it is, newsletters cannot be saved or sent here.</p>
       )}
 
-      {tab === "reminders" && owner ? <RemindersAdmin onError={onError} /> : (
+      {tab === "history" && owner ? <SendingHistory /> : tab === "reminders" && owner ? <RemindersAdmin onError={onError} /> : (
         <>
           <p className="cadmin-hint">Write a newsletter here, preview it and send a test to yourself. {owner ? "Then send it now or schedule it" : "An Owner then sends or schedules it"}. Sent newsletters with “Show on the website” ticked appear on <Link to="/newsletter">ibvu.org/newsletter</Link>.</p>
           {PREVIEW_MODE && scheduled.length > 0 && (

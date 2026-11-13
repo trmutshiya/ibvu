@@ -1,3 +1,13 @@
+// IBVU v6.10 — what changed in this file: every picture (the cover too) is shown at its
+// own width in pixels of the 544 px column (a new picture or cover starts at tile size)
+// and shrinks in proportion on a phone: width="340" style="width:62.5%;max-width:340px".
+// A cover with no width yet shows at tile size (340 px). The server copy matches.
+//
+// IBVU v6.09 — what changed in this file: pictures in the email are centred and keep the
+// size set in the editor; a picture's caption is shown under it in small grey text, and
+// the cover's caption under the cover. The server copy (send-newsletter) was changed
+// the same way.
+//
 // IBVU v6.04 — what changed in this file: the cover is the whole picture (its
 // framing only applies to the tile on the website).
 //
@@ -9,7 +19,7 @@
 //
 // Email programs (Gmail, Outlook, phones) ignore most page styling, so the
 // layout is one simple column with the styles written onto each element.
-import { wholeSrc } from './frame.js';
+import { wholeSrc, captionOf, widthOf, TILE_W, EMAIL_COLUMN } from './frame.js';
 
 export const SITE_URL = "https://ibvu.org";
 
@@ -26,14 +36,42 @@ export function styleForEmail(html) {
     .replace(/<blockquote>/g, `<blockquote style="margin:18px 0;padding:4px 0 4px 16px;border-left:3px solid ${C.sage};color:${C.muted};font-style:italic">`)
     .replace(/<ul>/g, `<ul style="margin:0 0 16px 22px;padding:0;font-size:17px;line-height:1.65;color:${C.text}">`)
     .replace(/<ol>/g, `<ol style="margin:0 0 16px 22px;padding:0;font-size:17px;line-height:1.65;color:${C.text}">`)
-    .replace(/<img /g, `<img style="display:block;max-width:100%;height:auto;border:0;margin:8px 0 14px" `)
+    .replace(/<img\b[^>]*>/g, emailPicture)
     .replace(/<a /g, `<a style="color:${C.sage};text-decoration:underline" `);
+}
+
+// One picture: centred, at its width from the editor, with its caption underneath.
+function attr(tag, name) {
+  const m = tag.match(new RegExp("\\s" + name + "=\"([^\"]*)\"", "i"));
+  return m ? m[1] : "";
+}
+// The width style: px wide in the 544 px column, smaller in proportion on a phone.
+function sized(px) {
+  const w = Math.max(60, Math.min(EMAIL_COLUMN, Math.round(px)));
+  return { attr: ` width="${w}"`, style: `width:${(w / EMAIL_COLUMN * 100).toFixed(2)}%;max-width:${w}px` };
+}
+export function emailPicture(tag) {
+  const src = attr(tag, "src"), alt = attr(tag, "alt"), caption = attr(tag, "data-caption");
+  const px = Number(attr(tag, "data-px")) || Number(attr(tag, "width")) || EMAIL_COLUMN;
+  const s = sized(px);
+  const mark = attr(tag, "data-i") ? ` data-i="${attr(tag, "data-i")}"` : ""; // admin's preview only
+  return `<div style="text-align:center;margin:8px 0 18px"><img src="${src}" alt="${alt}"${s.attr}${mark} style="display:inline-block;${s.style};height:auto;border:0">`
+    + (caption ? `<p style="margin:8px auto 0;font-size:14px;line-height:1.5;color:${C.muted};text-align:center">${caption}</p>` : "")
+    + `</div>`;
+}
+function coverHtml(cover, mark) {
+  if (!cover) return "";
+  const caption = captionOf(cover);
+  const s = sized(widthOf(cover) || TILE_W);
+  return `<div style="text-align:center;margin:0 0 ${caption ? "8px" : "22px"}"><img src="${esc(wholeSrc(cover))}" alt=""${s.attr}${mark ? ' data-i="cover"' : ""} style="display:inline-block;${s.style};height:auto;border:0"></div>`
+    + (caption ? `<p style="margin:0 0 22px;font-size:14px;line-height:1.5;color:${C.muted};text-align:center">${esc(caption)}</p>` : "");
 }
 
 // issue: { title, previewText, cover, body }; links: { viewUrl, unsubscribeUrl }
 // logoUrl: admin's preview passes its own copy of the logo, so the preview shows it
 // before the site with /email-logo.png is live.
-export function buildNewsletterEmail(issue, { viewUrl = "", unsubscribeUrl = "#", logoUrl = SITE_URL + "/email-logo.png" } = {}) {
+// markPictures: admin's preview marks the cover (data-i="cover") so it can be resized there.
+export function buildNewsletterEmail(issue, { viewUrl = "", unsubscribeUrl = "#", logoUrl = SITE_URL + "/email-logo.png", markPictures = false } = {}) {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(issue.title)}</title></head>
 <body style="margin:0;padding:0;background:${C.cream}">
 <span style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(issue.previewText)}</span>
@@ -43,7 +81,7 @@ ${viewUrl ? `<tr><td style="padding:10px 28px;font-family:Arial,sans-serif;font-
 <tr><td align="center" style="padding:28px 28px 8px"><img src="${esc(logoUrl)}" width="96" height="96" alt="IBVU" style="display:block;border:0"></td></tr>
 <tr><td style="padding:8px 28px 0;font-family:Georgia,serif">
 <h1 style="font-family:Georgia,serif;font-weight:normal;font-size:30px;line-height:1.25;color:${C.bark};margin:12px 0 18px;text-align:center">${esc(issue.title)}</h1>
-${issue.cover ? `<img src="${esc(wholeSrc(issue.cover))}" alt="" width="544" style="display:block;width:100%;max-width:544px;height:auto;border:0;margin:0 0 22px">` : ""}
+${coverHtml(issue.cover, markPictures)}
 ${styleForEmail(issue.body)}
 </td></tr>
 <tr><td style="padding:22px 28px 28px;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;color:${C.muted};border-top:1px solid ${C.line}">

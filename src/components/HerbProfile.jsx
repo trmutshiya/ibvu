@@ -1,3 +1,7 @@
+// IBVU v6.09 — what changed in this file: when admin ticks "Show the whole photo",
+// the photo keeps its own shape (up to 190 px, 110 px on a phone) instead of being
+// cropped into the square tile.
+//
 // IBVU v6.06 — what changed in this file:
 // - The herb photo is a small square tile (about 5 × 5 cm on a laptop, 3 × 3 cm on a
 //   phone) beside the herb's name, instead of a large picture under it. Clicking it
@@ -19,7 +23,7 @@ import { useState } from 'react';
 import Framed from './Framed.jsx';
 import HerbCard from './HerbCard.jsx';
 import { Lightbox } from './Media.jsx';
-import { wholeSrc } from '../lib/frame.js';
+import { wholeSrc, parseImage } from '../lib/frame.js';
 import ScientificSection from './ScientificSection.jsx';
 import { useHerbPhoto, herbKey, usePage } from '../lib/content.js';
 import { ShareButtons } from './Share.jsx';
@@ -55,7 +59,7 @@ export default function HerbProfile({ herb, herbs, conditionId, onBack }) {
           </div>
         </div>
         {photo && (
-          <figure className="herb-thumb">
+          <figure className={"herb-thumb" + (parseImage(photo).frame?.whole ? " whole" : "")}>
             <button type="button" className="herb-thumb-btn" onClick={() => setBig(true)} aria-label={"View the photo of " + herb.name + " full size"}>
               <Framed value={photo} ratio="1" alt={"Photo of " + herb.name} />
             </button>

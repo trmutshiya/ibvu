@@ -1,3 +1,6 @@
+// IBVU v6.09 — what changed in this file: ukZone / eventTime / ukMoment: event times are UK
+// time and show "GMT" or "BST" automatically from the date (e.g. "18:00 BST").
+//
 // IBVU v6.04 — what changed in this file since v6.03: usePastEvents (published
 // events whose date has passed, newest first) for the new Past events list.
 //
@@ -851,6 +854,28 @@ export function formatDate(iso, withDay = true) {
   const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
   const date = new Date(y, m - 1, d);
   return (withDay ? DAYS[date.getDay()] + " " : "") + d + " " + MONTHS[m - 1] + " " + y;
+}
+
+// v6.09: event times are UK time. The label is worked out from the date:
+// BST (British Summer Time) from the last Sunday in March to the last Sunday in
+// October, GMT the rest of the year. Clocks change at 01:00 GMT.
+function lastSundayUTC(y, monthIndex) {
+  const d = new Date(Date.UTC(y, monthIndex + 1, 0, 1));
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+  return d.getTime(); // 01:00 GMT that Sunday
+}
+// The moment an event starts, as a real time (for calendar files).
+export function ukMoment(dateISO, time = "12:00") {
+  const [y, m, d] = dateISO.slice(0, 10).split("-").map(Number);
+  const [h, mi] = (time || "12:00").split(":").map(Number);
+  const asGMT = Date.UTC(y, m - 1, d, h, mi || 0);
+  const bst = asGMT - 3600000 >= lastSundayUTC(y, 2) && asGMT - 3600000 < lastSundayUTC(y, 9);
+  return { utc: new Date(bst ? asGMT - 3600000 : asGMT), zone: bst ? "BST" : "GMT" };
+}
+export function ukZone(dateISO, time) { return dateISO ? ukMoment(dateISO, time).zone : ""; }
+// "18:00 BST" (empty when there is no time)
+export function eventTime(event) {
+  return event && event.time && event.date ? event.time + " " + ukZone(event.date, event.time) : (event && event.time) || "";
 }
 
 // The full web address of a page on this site (works in the single-file preview too).

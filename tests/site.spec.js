@@ -1,3 +1,7 @@
+// IBVU v6.10 — what changed in this file: checks that newsletter pictures and the cover start at tile size, resize by dragging in Write, the email and the web page, and show smaller on a phone.
+//
+// IBVU v6.09 — what changed in this file: checks for the whole-photo option, GMT/BST and the event preview, "← ibvu" going back, the smaller cookie card, the newsletter title box and missing-field message, picture size and caption in the email preview, the Sending history, and cover captions.
+//
 // IBVU v6.08 — what changed in this file: the cookie bar check uses the new wording
 // (Accept All, Reject All, Cookie Policy).
 //
@@ -240,6 +244,33 @@ test("Events: 'subscribe to our newsletter' opens the box with Mail Club & shop 
   await expect(box.getByLabel(/Herb Mail Club & shop/)).toBeChecked();
   await expect(box.getByLabel(/IBVU Monthly/)).not.toBeChecked();
   await expect(page.locator("#nl-email")).toBeFocused();
+});
+
+test("v6.09 '← ibvu' goes back to the previous page (home when there is none)", async ({ page }) => {
+  await page.goto("/educate/hs");
+  await page.locator(".herb-card").first().click();
+  await expect(page).toHaveURL(/\/educate\/hs\/.+/);
+  await page.getByRole("link", { name: "Back to the previous page" }).click();
+  await expect(page).toHaveURL(/\/educate\/hs$/);
+});
+
+test("v6.09 cookie bar: a small card with the buttons under the Cookie Policy link", async ({ page }) => {
+  await page.evaluate(() => {}).catch(() => {});
+  await page.goto("/");
+  await page.evaluate(() => localStorage.removeItem("ibvu_cookie_consent_v1"));
+  await page.reload();
+  const bar = page.getByRole("region", { name: "Cookie choice" });
+  await expect(bar).toBeVisible();
+  const box = await bar.boundingBox();
+  const vw = page.viewportSize().width;
+  expect(box.width).toBeLessThanOrEqual(vw > 640 ? 421 : vw);
+  const link = await bar.getByRole("link", { name: "Cookie Policy" }).boundingBox();
+  const accept = await bar.getByRole("button", { name: "Accept All" }).boundingBox();
+  const reject = await bar.getByRole("button", { name: "Reject All" }).boundingBox();
+  expect(accept.y).toBeGreaterThan(link.y + link.height - 1);
+  expect(Math.abs(accept.y - reject.y)).toBeLessThan(2);
+  expect(Math.abs(accept.width - reject.width)).toBeLessThan(2);
+  expect(await bar.evaluate(el => getComputedStyle(el).backgroundColor)).toBe("rgb(61, 44, 30)");
 });
 
 test("inner pages have the back button to home", async ({ page }) => {
@@ -850,4 +881,182 @@ test.describe("admin (sign-in and roles)", () => {
       await noSidewaysScroll(page);
     }
   });
+
+  // ── v6.09 ──
+  test("v6.09 herb photos: 'Show the whole photo' keeps the photo's own shape", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org", "/admin/herbphotos");
+    const row = page.locator(".cadmin-item", { hasText: "Ashwagandha" });
+    await row.locator("input[type=file]").setInputFiles("src/assets/pillar-educate.jpg"); // 900 × 600
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel(/Show the whole photo/).check();
+    await expect(dialog.getByRole("button", { name: "Larger +" })).toBeDisabled();
+    await dialog.getByRole("button", { name: "Save" }).click();
+    await expect(dialog).toHaveCount(0);
+    await page.goto("/educate/hs/ashwagandha");
+    const img = page.locator(".profile-header .herb-thumb.whole img[data-whole]");
+    await expect(img).toBeVisible();
+    const b = await img.boundingBox();
+    const max = page.viewportSize().width > 640 ? 190 : 110;
+    expect(Math.round(b.width)).toBeLessThanOrEqual(max + 1);
+    expect(Math.abs(b.width / b.height - 1.5)).toBeLessThan(0.05);           // its own shape, nothing cut off
+    await page.goto("/educate/hs");
+    const t = await page.locator(".herb-card.has-photo .herb-card-thumb img").boundingBox();
+    expect(Math.round(t.width)).toBeLessThanOrEqual(64);
+    expect(Math.abs(t.width / t.height - 1.5)).toBeLessThan(0.08);
+    // and back to the square tile
+    await page.goto("/admin/herbphotos");
+    await page.locator(".cadmin-item", { hasText: "Ashwagandha" }).getByRole("button", { name: "Frame photo" }).click();
+    await page.getByRole("dialog").getByLabel(/Show the whole photo/).uncheck();
+    await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+    await page.goto("/educate/hs/ashwagandha");
+    await expect(page.locator(".profile-header .herb-thumb.whole")).toHaveCount(0);
+  });
+
+  test("v6.09 events: GMT or BST from the date, and a preview before saving", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org", "/admin/events");
+    await page.getByRole("button", { name: "New event" }).click();
+    await page.locator("#ev-title").fill("Summer herb walk");
+    await page.locator("#ev-date").fill("2027-07-10");
+    await page.locator("#ev-time").fill("18:00");
+    await expect(page.locator(".ev-zone")).toHaveText("Shown as 18:00 BST (British Summer Time)");
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    const tile = page.locator(".ev-preview .event-tile");
+    await expect(tile).toContainText("18:00 BST");
+    await expect(tile).toContainText("Summer herb walk");
+    await page.locator("#ev-date").fill("2027-12-04");
+    await expect(page.locator(".ev-zone")).toHaveText("Shown as 18:00 GMT (Greenwich Mean Time)");
+    await expect(tile).toContainText("18:00 GMT");
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.goto("/shop/events");
+    await expect(page.locator(".event-tile", { hasText: "Summer herb walk" })).toContainText("Saturday 4 December 2027 · 18:00 GMT");
+    // the calendar file uses the real time (18:00 GMT = 18:00Z)
+    const href = await page.locator(".event-tile", { hasText: "Summer herb walk" }).getByRole("link", { name: /calendar/i }).first().getAttribute("href").catch(() => "");
+    if (href) expect(decodeURIComponent(href)).toContain("DTSTART:20271204T180000Z");
+  });
+
+  test("v6.09 newsletters: title box, what is missing, picture size and caption in the email, sending history", async ({ page }) => {
+    await confirmedReader(page, "history@example.org");
+    await signIn(page, "hello@ibvu.org", "/admin/newsletters");
+    await page.getByRole("button", { name: "New newsletter" }).click();
+    // the Write button can be read (it was dark on dark)
+    const write = page.locator(".cadmin-editor-bar .cadmin-tabs .cadmin-btn.on");
+    await write.hover();                                      // it went blank while the mouse was over it
+    const [fg, bg] = await write.evaluate(el => { const s = getComputedStyle(el); return [s.color, s.backgroundColor]; });
+    expect(fg).not.toBe(bg);
+    await expect(page.getByText("Newsletter title (shown at the top of the email and on the website)")).toBeVisible();
+    await page.locator("#nl-subject").fill("Pictures");
+    await page.getByRole("button", { name: "Send a test to me" }).click();
+    await expect(page.locator(".cadmin-problem")).toContainText("Newsletter title");
+    await expect(page.locator("#nl-title")).toHaveClass(/nl-missing/);
+    await expect(page.locator("#nl-title")).toBeFocused();
+    await page.locator("#nl-title").fill("Pictures issue");
+    await expect(page.locator("#nl-title")).not.toHaveClass(/nl-missing/);
+    // a picture with a caption, added in the framing window
+    await page.locator(".rte-content .ProseMirror").click();
+    await page.keyboard.type("Hello.");
+    await page.locator(".rte input[type=file]").setInputFiles("src/assets/pillar-educate.jpg");
+    const crop = page.getByRole("dialog", { name: /Crop and frame/ });
+    await crop.getByLabel(/Caption/).fill("A lecture at IBVU");
+    await crop.getByRole("button", { name: "Save" }).click();
+    await expect(crop).toHaveCount(0);
+    await expect(page.locator(".rte-pic-caption")).toHaveText("A lecture at IBVU");
+    // make it smaller in the email preview
+    await page.getByRole("button", { name: "Preview as email" }).click();
+    const frame = page.frameLocator(".nl-email-frame");
+    await expect(frame.getByText("A lecture at IBVU")).toBeVisible();
+    // v6.10: a new picture starts at tile size (900 × 600 → 340 px)
+    await expect(frame.locator("img[data-i='0']")).toHaveAttribute("width", "340");
+    await frame.locator("img[data-i='0']").click();
+    const bar = page.getByRole("toolbar", { name: "Picture size" });
+    await expect(bar).toContainText("Picture 1: 340 px wide · tile size");
+    await bar.getByRole("button", { name: "− Smaller" }).click();
+    await expect(frame.locator("img[data-i='0']")).toHaveAttribute("width", "320");
+    await bar.getByRole("button", { name: "Done" }).click();
+    await page.getByRole("button", { name: "Write" }).click();
+    await expect(page.locator(".rte-pic")).toHaveAttribute("style", /width: min\(320px, 58\.82%\)/);
+    // send, then the sending history
+    await page.getByRole("button", { name: "Send now…" }).click();
+    await page.getByRole("button", { name: "Yes, send it now" }).click();
+    await expect(page.getByText("Sent to 1 person.")).toBeVisible();
+    await page.goto("/admin/newsletters");
+    await page.getByRole("tab", { name: "Sending history" }).click();
+    const person = page.locator(".nl-history-person", { hasText: "history@example.org" });
+    await expect(person).toContainText("Pictures issue");
+    await expect(person).toContainText("Sent");
+    await page.locator("#nh-search").fill("nobody@");
+    await expect(page.getByText("Nothing matches.")).toBeVisible();
+    await page.locator("#nh-search").fill("history@");
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: /Download as spreadsheet/ }).click();
+    expect((await download).suggestedFilename()).toMatch(/^ibvu-sending-history-/);
+    await noSidewaysScroll(page);
+  });
+
+  test("v6.10 newsletters: pictures and cover start at tile size, resize by dragging in every view, smaller on a phone", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org", "/admin/newsletters");
+    await page.getByRole("button", { name: "New newsletter" }).click();
+    await page.locator("#nl-title").fill("Tile pictures");
+    await page.locator("#nl-subject").fill("Tile pictures");
+    // cover: 900 × 600 → tile size 340 px
+    await page.locator(".cadmin-image input[type=file]").first().setInputFiles("src/assets/pillar-educate.jpg");
+    await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+    await expect(page.locator(".nl-cover-size .cadmin-hint")).toContainText("340 px wide (tile size)");
+    // a tall picture in the text: 900 × 1125 → fits in the tile: 182 px
+    await page.locator(".rte-content .ProseMirror").click();
+    await page.keyboard.type("Hello.");
+    await page.locator(".rte input[type=file]").setInputFiles("src/assets/shop-events.jpg");
+    await page.getByRole("dialog", { name: /Crop and frame/ }).getByRole("button", { name: "Save" }).click();
+    await expect(page.locator(".rte-pic")).toHaveAttribute("style", /min\(182px/);
+    // the email: drag the picture's corner outwards
+    await page.getByRole("button", { name: "Preview as email" }).click();
+    const frame = page.frameLocator(".nl-email-frame");
+    await expect(frame.locator("img[data-i='cover']")).toHaveAttribute("width", "340");
+    await frame.locator("img[data-i='0']").click();
+    const h = await frame.locator(".rz-h.br").boundingBox();
+    await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(h.x + h.width / 2 + 30, h.y + 10, { steps: 6 });
+    await page.mouse.up();
+    const bar = page.getByRole("toolbar", { name: "Picture size" });
+    await expect(bar).not.toContainText("182 px");
+    const dragged = Number((await bar.locator(".nl-picbar-label").textContent()).match(/(\d+) px/)[1]);
+    expect(dragged).toBeGreaterThan(200);
+    // the web page: make the cover full width, then back to tile size
+    await page.getByRole("button", { name: "Preview as web page" }).click();
+    await page.locator(".nl-web [data-i='cover']").click();
+    await bar.getByRole("button", { name: "Full width" }).click();
+    await expect(bar).toContainText("Cover: 544 px wide · full width");
+    await page.getByRole("button", { name: "Preview as email" }).click();
+    await expect(frame.locator("img[data-i='cover']")).toHaveAttribute("width", "544");
+    await page.getByRole("button", { name: "Write" }).click();
+    await expect(page.locator(".nl-cover-size .cadmin-hint")).toContainText("544 px wide");
+    await expect(page.locator(".rte-pic")).toHaveAttribute("style", new RegExp("min\\(" + dragged + "px"));
+    // on a phone the pictures are smaller in proportion
+    if (page.viewportSize().width <= 640) {
+      await page.getByRole("button", { name: "Preview as email" }).click();
+      const shown = (await frame.locator("img[data-i='cover']").boundingBox()).width;
+      expect(shown).toBeLessThan(page.viewportSize().width);
+    }
+    await noSidewaysScroll(page);
+  });
+
+  test("v6.09 covers: a caption under the cover of an open article", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org", "/admin/articles");
+    await page.getByRole("button", { name: "New article" }).click();
+    await page.locator("#ar-title").fill("Cover caption test");
+    await page.locator(".cadmin-image input[type=file]").first().setInputFiles("src/assets/pillar-educate.jpg");
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel(/Caption/).fill("Students in Harare");
+    await dialog.getByRole("button", { name: "Save" }).click();
+    await expect(page.locator(".cadmin-image-caption input")).toHaveValue("Students in Harare");
+    await page.locator(".rte-content .ProseMirror").click();
+    await page.keyboard.type("Body text.");
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.goto("/media/cover-caption-test");
+    await expect(page.locator(".article-cover-figure figcaption")).toHaveText("Students in Harare");
+    expect(await page.locator("img.article-cover").getAttribute("src")).not.toContain("cap=");
+  });
+
 });

@@ -1,3 +1,20 @@
+// IBVU v6.10 — what changed in this file: a newsletter cover can also keep the width it
+// is shown at, in pixels of the 544 px email column, after "&cw=":
+//   …/photo.jpg#frame=50,50,1&cw=340
+// widthOf(value) reads it, withWidth(value, px) sets it; buildImage takes it as a fifth
+// value. tileWidth(ratio) is "tile size": the width at which a picture of that shape
+// fits inside a 340 × 227 px tile (the 3:2 tiles on ibvu.org). shownWidth(px) is the CSS
+// width that shows a picture at px wide, shrinking in proportion on narrower screens.
+//
+// IBVU v6.09 — what changed in this file: a picture can be set to "show the whole
+// photo" (no cropping). This is kept as a fourth value, "w", after the framing:
+//   https://…/photo.jpg#frame=50,50,1,w
+// Places that support it (herb photos) then show the picture in its own shape,
+// at the size of the tile, with nothing cut off and no empty edge.
+// Also new: a caption for a cover picture (articles, blog posts, newsletters) is
+// kept the same way, after "&cap=":   …/photo.jpg#frame=50,50,1&cap=Aloe%20vera
+// captionOf(value) reads it; buildImage(src, frame, orig, caption) writes it.
+//
 // IBVU v6.04 — new file. How a picture sits in its frame.
 //
 // Admin can move a picture and zoom in (to crop) inside the shape it is shown
@@ -29,25 +46,51 @@ const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 export function parseImage(value) {
   const text = String(value || "");
   const at = text.lastIndexOf(MARK);
-  if (at < 0) return { src: text, frame: null, orig: "" };
+  if (at < 0) return { src: text, frame: null, orig: "", caption: "", width: 0 };
   const src = text.slice(0, at);
   const [spec, ...rest] = text.slice(at + MARK.length).split("&");
-  const [x, y, z] = spec.split(",");
+  const [x, y, z, w] = spec.split(",");
   const frame = { x: clamp(num(x, 50), 0, 100), y: clamp(num(y, 50), 0, 100), z: clamp(num(z, 1), 1, 3) };
+  if (w === "w") { frame.x = 50; frame.y = 50; frame.z = 1; frame.whole = true; }
   const origPart = rest.find(p => p.startsWith("orig="));
-  return { src, frame, orig: origPart ? decodeURIComponent(origPart.slice(5)) : "" };
+  const capPart = rest.find(p => p.startsWith("cap="));
+  const cwPart = rest.find(p => p.startsWith("cw="));
+  let caption = "";
+  try { caption = capPart ? decodeURIComponent(capPart.slice(4)) : ""; } catch { caption = ""; }
+  const width = cwPart ? Math.round(Number(cwPart.slice(3))) || 0 : 0;
+  return { src, frame, orig: origPart ? decodeURIComponent(origPart.slice(5)) : "", caption, width };
 }
 
 export function isDefaultFrame(f) {
-  return !f || (f.x === 50 && f.y === 50 && f.z === 1);
+  return !f || (f.x === 50 && f.y === 50 && f.z === 1 && !f.whole);
 }
 
 // { src, frame, orig } → "url#frame=…"
-export function buildImage(src, frame, orig = "") {
-  if (!frame || (isDefaultFrame(frame) && !orig)) return src || "";
+export function buildImage(src, frame, orig = "", caption = "", width = 0) {
+  const cap = (caption ? "&cap=" + encodeURIComponent(caption) : "") + (width ? "&cw=" + Math.round(width) : "");
+  if ((!frame || isDefaultFrame(frame)) && !orig && !cap) return src || "";
+  const f = frame || DEFAULT_FRAME;
   const r = n => Math.round(n * 100) / 100;
-  return (src || "") + MARK + [r(frame.x), r(frame.y), r(frame.z)].join(",") + (orig ? "&orig=" + encodeURIComponent(orig) : "");
+  const spec = f.whole ? "50,50,1,w" : [r(f.x), r(f.y), r(f.z)].join(",");
+  return (src || "") + MARK + spec + (orig ? "&orig=" + encodeURIComponent(orig) : "") + cap;
 }
+
+// v6.10: the width a newsletter cover is shown at (0 = not set yet).
+export const EMAIL_COLUMN = 544, TILE_W = 340, TILE_H = 227;
+export function widthOf(value) { return parseImage(value).width || 0; }
+export function withWidth(value, px) {
+  const p = parseImage(value);
+  if (!p.src && !p.orig) return value;
+  return buildImage(p.src, p.frame, p.orig, p.caption, px);
+}
+export function tileWidth(ratio) { return Math.round(Math.min(TILE_W, TILE_H * (ratio || 1.5))); }
+export function shownWidth(px) {
+  const w = Math.max(60, Math.min(EMAIL_COLUMN, Math.round(px)));
+  return "min(" + w + "px, " + (w / EMAIL_COLUMN * 100).toFixed(2) + "%)";
+}
+
+// The caption saved with a picture ("" when there is none).
+export function captionOf(value) { return parseImage(value).caption || ""; }
 
 // Just the picture's address, for places that cannot frame (sharing, emails).
 export function plainSrc(value, fallback = "") {
