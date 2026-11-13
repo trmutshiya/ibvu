@@ -1,15 +1,35 @@
+// IBVU v5.7 — what changed in this file: the "IBVU" title is now marked as the
+// page's main heading (for search engines and screen readers). It looks the same.
+//
+// IBVU v5.5 — what changed in this file since v5.4.1:
+// - Removed the "Herbarium Scientifica · From the Earth" line from the bottom
+//   of the animation.
+//
+// IBVU v5.4.1 — what changed in this file since v5.4:
+// - The scroll-down arrow under the tree is now a drawn shape instead of a
+//   text character (part of the fix for the arrow glitch; the rest is in index.css).
+//
+// IBVU v5.2 — what changed in this file since v5.1:
+// - This is now the hero at the top of a scrolling home page (it used to be
+//   the whole page). The animation itself is unchanged.
+// - The "Enter Herbarium" button is removed. The Herbarium is reached through
+//   Educate in the header, or "Explore Education" further down the page.
+// - The About and Contact links that sat either side of that button are
+//   removed too: both are now in the header.
+// - In their place is a small scroll-down cue that appears when the animation ends.
+// - The About / Contact overlays moved out of this file (see InfoPanel.jsx).
 import { BRANCHES, TREE_START, LEVEL_DUR, BRANCH_DUR, LEAVES_AT, MOTES, DROPLETS } from '../constants/animation.js';
 
-export default function Landing({ skipped, onSkip, onEnter, panel, onPanel }) {
+export default function Landing({ skipped, onSkip, onScrollDown }) {
   return (
-    <div className={"ibvu-landing" + (skipped ? " anim-skip" : "")}>
+    <section id="home-hero" className={"ibvu-landing" + (skipped ? " anim-skip" : "")}>
       <button className="skip-btn" onClick={onSkip}>skip ›</button>
       <div className="atm">
         {MOTES.map(m => (
           <div key={m.id} className="mote" style={{ left: m.x + "%", top: m.y + "%", width: m.size, height: m.size, "--d": m.dur, "--dl": m.delay }} />
         ))}
       </div>
-      <div className="ibvu-title">IBVU</div>
+      <h1 className="ibvu-title">IBVU</h1>
       <div className="ibvu-lower">ibvu</div>
       <div className="scene">
         <div className="bowl-wrap">
@@ -39,63 +59,11 @@ export default function Landing({ skipped, onSkip, onEnter, panel, onPanel }) {
           ))}
         </svg>
       </div>
-      <div className="brand-nav">
-        <div className="nav-rule" />
-        <button className="nav-link" onClick={() => onPanel("about")}>About</button>
-        <button className="enter-btn" onClick={onEnter}>Enter Herbarium</button>
-        <button className="nav-link" onClick={() => onPanel("contact")}>Contact</button>
-      </div>
+      <button className="scroll-cue" onClick={onScrollDown} aria-label="Scroll down to read about IBVU">
+        <span className="scroll-cue-line" />
+        <span className="scroll-cue-arrow" />
+      </button>
 
-      {panel === "about" && (
-        <div className="panel">
-          <button className="panel-close" onClick={() => onPanel(null)}>✕ close</button>
-          <div className="panel-inner">
-            <p className="panel-eyebrow">IBVU</p>
-            <h2 className="panel-title">From the Earth</h2>
-            <p className="panel-body">
-              IBVU is rooted in the belief that all knowledge begins with the earth
-              beneath us. IBVU is inspired by the Shona word <em>ivhu</em>, meaning
-              soil or earth, the foundation from which life, knowledge, and innovation grow.
-              <br /><br />
-              Founded by neuroscientist Tatenda Mutshiya and analytical chemist Dara Pierre,
-              IBVU builds scientific platforms that draw on knowledge from people around the
-              world and bring it into conversation with modern research.
-              <br /><br />
-              Herbarium Scientifica is the first of these platforms. It provides global
-              user submitted plant solutions which are scientifically verified to provide
-              information on the latest research. Our goal is for understudied plants to
-              be highlighted and brought to the attention of laboratories around the world.
-              <br /><br />
-              Our inspiration comes from Nobel Prize winner Tu Youyou, who looked back to
-              traditional knowledge and identified sweet wormwood (<em>Artemisia annua</em>),
-              a discovery that transformed malaria treatment. IBVU believes that when global
-              communities share knowledge, science advances.
-            </p>
-            <div className="panel-rule" />
-            <div style={{ marginTop: 28 }}>
-              <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, fontWeight: 300, letterSpacing: 4, textTransform: "uppercase", color: "rgba(245,240,232,0.3)", marginBottom: 10 }}>Get to Know the Founders</p>
-              <a href="https://www.linkedin.com/in/tatenda-mutshiya/" target="_blank" rel="noreferrer" className="panel-contact-link">Tatenda Mutshiya ↗</a>
-              <br />
-              <a href="https://www.linkedin.com/in/dlpierre/" target="_blank" rel="noreferrer" className="panel-contact-link">Dara Pierre ↗</a>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {panel === "contact" && (
-        <div className="panel">
-          <button className="panel-close" onClick={() => onPanel(null)}>✕ close</button>
-          <div className="panel-inner">
-            <p className="panel-eyebrow">get in touch</p>
-            <h2 className="panel-title">Contact</h2>
-            <p className="panel-body">For enquiries, collaborations, or to learn more about IBVU and what we're building.</p>
-            <a className="panel-contact-link" href="mailto:hello@ibvu.org">hello@ibvu.org</a>
-            <div className="panel-rule" />
-          </div>
-        </div>
-      )}
-
-      <p className="bottom-label">Herbarium Scientifica &middot; From the Earth</p>
-    </div>
+    </section>
   );
 }

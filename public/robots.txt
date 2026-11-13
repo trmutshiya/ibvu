@@ -1,0 +1,12 @@
+# IBVU v6.03 — past newsletters (ibvu.org/newsletter/...) may now be listed; only the
+# confirm page under /newsletter/ stays out.
+# IBVU v6.02 — the email confirm and unsubscribe pages are not listed either.
+# IBVU v5.7 — new file. Tells search engines what to read.
+# Everything on the site may be listed except the admin area.
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /newsletter/confirm
+Disallow: /unsubscribe
+
+Sitemap: https://ibvu.org/sitemap.xml

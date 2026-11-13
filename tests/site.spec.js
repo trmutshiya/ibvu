@@ -1,0 +1,621 @@
+// IBVU v6.03 — what changed in this file since v6.02: checks newsletters (write, add from
+// the site, preview as email and web page, test, send, the sent record, the archive at
+// /newsletter, hide and Copy to Blog), scheduling in UK time and cancelling, who may send,
+// the Reminders list and settings, and draft changes (articles, a Writer's suggested
+// changes, page wording with "Show draft changes"). Owners now have 11 admin sections.
+//
+// IBVU v6.02 — what changed in this file since v5.92: checks the mailing
+// lists (newsletter ticks, the contact form's updates tick, the confirm and
+// unsubscribe pages, admin Messages and Mailing lists with the spreadsheet
+// download) and the "subscribe to our newsletter" link on Events. Owners now
+// have 10 admin sections.
+//
+// IBVU v5.92 — what changed in this file since v5.91: checks the Privacy page
+// and its footer link, and that herbs published twice get separate addresses.
+//
+// IBVU v5.91 — what changed in this file since v5.9: checks the logo in the
+// footer and the "Dr" in the About text.
+//
+// IBVU v5.9 — what changed in this file since v5.8: admin is now behind a
+// sign-in, so the admin checks sign in first (using the preview's
+// demonstration sign-in) and check that nothing shows before sign-in. New
+// checks: the "Edit this page" button, editing a page's wording in admin, and
+// ibvu.org/about.
+//
+// IBVU v5.8 — what changed in this file since v5.7: the Blog page and the Blog
+// link in the menu are checked, and the admin checks expect the Blog section.
+//
+// IBVU v5.7 — new file. Permanent tests for the website.
+// Run with "npm test" (see playwright.config.js for first-time setup).
+//
+// What they check, at laptop and phone size:
+//   - every page opens, has a heading and does not scroll sideways
+//   - the menu (Home, About, Regulate, Educate, Innovate, Shop, Contact)
+//   - short addresses such as ibvu.org/mail forward to the right page
+//   - every herb has its own address, and the back button works
+//   - the herb submission form asks for the "my own photo" tick
+//   - admin: each role sees only its own sections
+// They only read pages. They never send a form or write to the database.
+//
+// NOTE: the admin tests sign in through the preview's demonstration sign-in
+// (any 6-digit code). When the tests are run against a build that is connected
+// to the database, sign-in needs a real emailed code, so those tests are
+// skipped and say so.
+import { test, expect } from '@playwright/test';
+import { mergeHerbs } from '../src/lib/herbs.js';
+import { readFileSync } from 'node:fs';
+
+const PAGES = [
+  ["/", "home"], ["/regulate", "Regulate"], ["/educate/hs", "Herbarium"], ["/educate/hs/submit", "Submit"], ["/educate/blog", "Blog"],
+  ["/innovate", "Innovate"], ["/media", "Media"], ["/contact", "Contact"], ["/privacy", "Privacy"],
+  ["/shop", "Shop"], ["/shop/mail", "Mail Club"], ["/shop/events", "Events"],
+  ["/shop/products", "Products"], ["/shop/resources", "Resources"], ["/shop/membership", "Membership"],
+];
+
+test.beforeEach(async ({ page }) => {
+  // Skip the intro animation so tests do not wait for it.
+  await page.addInitScript(() => { try { sessionStorage.setItem("ibvu_intro_played", "1"); } catch {} });
+});
+
+const isPhone = (testInfo) => testInfo.project.name === "phone";
+
+async function noSidewaysScroll(page) {
+  const extra = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(extra, "the page is wider than the screen").toBeLessThanOrEqual(1);
+}
+
+for (const [path, name] of PAGES) {
+  test("page opens: " + name + " (" + path + ")", async ({ page }) => {
+    const crashes = [];
+    page.on("pageerror", e => crashes.push(e.message));
+    await page.goto(path);
+    await expect(page.locator("h1").first()).toBeAttached();
+    await expect(page.locator("h1")).toHaveCount(1);
+    await expect(page.getByText("Page not found")).toHaveCount(0);
+    await noSidewaysScroll(page);
+    expect(crashes, "errors on the page").toEqual([]);
+  });
+}
+
+test("an unknown address shows the not-found page", async ({ page }) => {
+  await page.goto("/no-such-page");
+  await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+});
+
+test("short addresses forward to the shop pages", async ({ page }) => {
+  for (const s of ["mail", "events", "products", "resources", "membership"]) {
+    await page.goto("/" + s);
+    await expect(page).toHaveURL(new RegExp("/shop/" + s + "$"));
+  }
+  await page.goto("/educate");
+  await expect(page).toHaveURL(/\/educate\/hs$/);
+});
+
+test("menu: seven items, Home and Shop work", async ({ page }, testInfo) => {
+  await page.goto("/regulate");
+  if (isPhone(testInfo)) {
+    await page.getByRole("button", { name: "Menu" }).click();
+    const menu = page.locator("#site-menu");
+    for (const item of ["Home", "About", "Regulate", "Educate", "Innovate", "Shop", "Contact"]) {
+      await expect(menu.getByText(item, { exact: true }).first()).toBeVisible();
+    }
+    await menu.getByRole("link", { name: "Shop", exact: true }).click();
+    await expect(page).toHaveURL(/\/shop$/);
+    await page.getByRole("button", { name: "Menu" }).click();
+    await page.locator("#site-menu").getByRole("link", { name: "Home", exact: true }).click();
+  } else {
+    const nav = page.locator("nav.main-nav");
+    await expect(nav.locator(".hdr-link")).toHaveText(["Home", "About", "Regulate", "Educate", "Innovate", "Shop", "Contact"]);
+    await nav.locator(".hdr-link", { hasText: "Shop" }).click();
+    await expect(page).toHaveURL(/\/shop$/);
+    await page.locator("nav.main-nav .hdr-link", { hasText: "Home" }).click();
+  }
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test("Blog is reachable from the Educate menu", async ({ page }, testInfo) => {
+  await page.goto("/regulate");
+  if (isPhone(testInfo)) {
+    await page.getByRole("button", { name: "Menu" }).click();
+    await page.locator("#site-menu").getByRole("link", { name: "Blog", exact: true }).click();
+  } else {
+    await page.locator("nav.main-nav .hdr-link", { hasText: "Educate" }).hover();
+    await page.locator("nav.main-nav").getByRole("link", { name: "Blog", exact: true }).click();
+  }
+  await expect(page).toHaveURL(/\/educate\/blog$/);
+  await expect(page.getByRole("heading", { name: "Blog", level: 1 })).toBeVisible();
+});
+
+test("ibvu.org/about opens the About pop-up on the home page", async ({ page }) => {
+  await page.goto("/about");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("dialog", { name: "About IBVU" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "About IBVU" })).toHaveCount(0);
+});
+
+test("the About pop-up closes when you move to another page", async ({ page }) => {
+  await page.goto("/regulate");
+  await page.goto("/about");
+  await expect(page.getByRole("dialog", { name: "About IBVU" })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/regulate$/);
+  await expect(page.getByRole("dialog", { name: "About IBVU" })).toHaveCount(0);
+});
+
+test("the footer links to the Privacy page", async ({ page }) => {
+  await page.goto("/shop");
+  await page.locator("footer").getByRole("link", { name: "Privacy" }).click();
+  await expect(page).toHaveURL(/\/privacy$/);
+  await expect(page.getByRole("heading", { name: "Privacy", level: 1 })).toBeVisible();
+});
+
+test("herbs published twice get their own addresses", () => {
+  const herbs = mergeHerbs(
+    [{ name: "St. John's Wort" }, { name: "Ginger" }, { name: "Vitex" }],
+    [{ name: "St John's wort" }, { name: "Chamomile" }, { name: "Chamomile" }, { name: "Ginger" }],
+  );
+  // the approved version replaces the built-in one, even when spelled slightly differently
+  expect(herbs.map(h => h.name)).toEqual(["Vitex", "St John's wort", "Chamomile", "Chamomile", "Ginger"]);
+  // every herb has a different address
+  expect(herbs.map(h => h.slug)).toEqual(["vitex", "st-john-s-wort", "chamomile", "chamomile-2", "ginger"]);
+});
+
+test("the footer shows the IBVU logo", async ({ page }) => {
+  await page.goto("/regulate");
+  const logo = page.locator("footer img.footer-logo");
+  await logo.scrollIntoViewIfNeeded();
+  await expect(logo).toBeVisible();
+  await expect(logo).toHaveAttribute("alt", /IBVU/);
+  // the picture has really loaded
+  await expect.poll(() => logo.evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
+});
+
+test("About names the founder as Dr Tatenda Mutshiya", async ({ page }) => {
+  await page.goto("/about");
+  const about = page.getByRole("dialog", { name: "About IBVU" });
+  await expect(about.getByText("Founded by neuroscientist Dr Tatenda Mutshiya and analytical chemist Dara Pierre")).toBeVisible();
+  await expect(about.getByRole("link", { name: /Dr Tatenda Mutshiya/ })).toBeVisible();
+});
+
+test("Events: 'subscribe to our newsletter' opens the box with Mail Club & shop ticked", async ({ page }) => {
+  await page.goto("/shop/events");
+  await page.getByRole("button", { name: "subscribe to our newsletter" }).click();
+  const box = page.locator("#newsletter");
+  await expect(box.getByLabel(/Herb Mail Club & shop/)).toBeChecked();
+  await expect(box.getByLabel(/IBVU Monthly/)).not.toBeChecked();
+  await expect(page.locator("#nl-email")).toBeFocused();
+});
+
+test("inner pages have the back button to home", async ({ page }) => {
+  await page.goto("/innovate");
+  await page.getByRole("link", { name: "Back to the IBVU home page" }).click();
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test("the public site does not link to admin", async ({ page }) => {
+  for (const path of ["/", "/educate/hs", "/shop"]) {
+    await page.goto(path);
+    await expect(page.locator('a[href*="/admin"]')).toHaveCount(0);
+    await expect(page.locator(".admin-trigger")).toHaveCount(0);
+  }
+});
+
+test("every herb has its own address", async ({ page }) => {
+  await page.goto("/educate/hs");
+  const card = page.locator("a.herb-card").first();
+  await expect(card).toBeVisible();
+  const name = (await card.locator("h3").innerText()).trim();
+  await card.click();
+  await expect(page).toHaveURL(/\/educate\/hs\/[a-z0-9-]+$/);
+  await expect(page.locator("h1")).toHaveText(name);
+  await expect(page).toHaveTitle(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  await noSidewaysScroll(page);
+
+  // Opening the address directly (a shared link) shows the same herb.
+  await page.reload();
+  await expect(page.locator("h1")).toHaveText(name);
+
+  // The browser's back button returns to the catalogue.
+  await page.goBack();
+  await expect(page).toHaveURL(/\/educate\/hs$/);
+  await expect(page.locator("a.herb-card").first()).toBeVisible();
+});
+
+test("an unknown herb address says so", async ({ page }) => {
+  await page.goto("/educate/hs/not-a-real-herb");
+  await expect(page.getByText("We could not find that herb.")).toBeVisible();
+});
+
+test("submission form: a photo needs the 'my own photo' tick", async ({ page }) => {
+  await page.goto("/educate/hs/submit");
+  await expect(page.getByText("Only add a photo if it is your own.")).toBeVisible();
+  // A tiny 1x1 image, made here so the test needs no file on disk.
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  await page.locator("#herb-photo").setInputFiles({ name: "leaf.png", mimeType: "image/png", buffer: png });
+  await expect(page.getByAltText("The photo you chose")).toBeVisible();
+  // Trying to send without the tick is stopped before anything is sent.
+  await page.locator("button.submit-btn").click();
+  await expect(page.getByText("Please confirm this is your own photo, or remove it.")).toBeVisible();
+  await page.getByLabel("This is my own photo and I give IBVU permission to publish it.").check();
+  await expect(page.getByText("Please confirm this is your own photo, or remove it.")).toHaveCount(0);
+  await page.getByRole("button", { name: "Remove photo" }).click();
+  await expect(page.getByRole("button", { name: "Choose a photo" })).toBeVisible();
+});
+
+test.describe("admin (sign-in and roles)", () => {
+  const sections = (page) => page.locator(".cadmin-home-card h2");
+
+  // Signs in through the preview's demonstration sign-in. Skips the test when
+  // the build is connected to the database (a real emailed code is needed).
+  async function signIn(page, email, path = "/admin") {
+    await page.goto(path);
+    await expect(page.getByRole("heading", { name: "IBVU Admin" })).toBeVisible();
+    const demo = await page.getByText("Preview only: this file cannot send emails.").count();
+    test.skip(!demo, "This build uses real sign-in codes, so the admin checks cannot run by themselves.");
+    await page.locator("#signin-email").fill(email);
+    await page.getByRole("button", { name: /Send sign-in code/ }).click();
+    await page.locator("#signin-code").fill("123456");
+    await page.getByRole("button", { name: /^Sign in/ }).click();
+  }
+  async function signOut(page) {
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page.getByRole("heading", { name: "IBVU Admin" })).toBeVisible();
+  }
+  async function addPerson(page, email, role, herbReview = false) {
+    await page.goto("/admin/people");
+    await page.locator("#pe-email").fill(email);
+    await page.locator("#pe-role").selectOption(role);
+    if (herbReview) await page.getByLabel("Can also review herb submissions and herb photos").check();
+    await page.getByRole("button", { name: "Add person" }).click();
+    await expect(page.locator(".cadmin-item-title", { hasText: email })).toBeVisible();
+  }
+
+  test("every admin address asks for sign-in first, and shows nothing before it", async ({ page }) => {
+    for (const s of ["", "/herbreview", "/herbphotos", "/events", "/articles", "/blog", "/pages", "/people", "/history", "/messages", "/newsletters", "/lists"]) {
+      await page.goto("/admin" + s);
+      await expect(page.getByRole("heading", { name: "IBVU Admin" })).toBeVisible();
+      await expect(page.locator(".admin-switch")).toHaveCount(0);
+      await expect(page.locator(".cadmin-wrap")).toHaveCount(0);
+    }
+  });
+
+  test("an address that is not on the People page cannot sign in", async ({ page }) => {
+    await signIn(page, "nobody@example.org");
+    await expect(page.getByText("That code is not right or has expired.")).toBeVisible();
+    await expect(page.locator(".admin-switch")).toHaveCount(0);
+  });
+
+  test("Owner sees every section, each with its own address, and can sign out", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org");
+    await expect(sections(page)).toHaveCount(11);
+    for (const s of ["herbreview", "herbphotos", "events", "articles", "blog", "pages", "people", "history", "messages", "newsletters", "lists"]) {
+      await page.goto("/admin/" + s);
+      await expect(page.locator(".admin-switch")).toBeVisible();
+      await expect(page.getByText("is not part of your access")).toHaveCount(0);
+      await expect(page.getByText("There is no admin section at this address")).toHaveCount(0);
+      await noSidewaysScroll(page);
+    }
+    await signOut(page);
+    await page.goto("/admin/people");
+    await expect(page.getByRole("heading", { name: "IBVU Admin" })).toBeVisible();
+  });
+
+  test("signing in at a section's address lands on that section", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org", "/admin/events");
+    await expect(page.getByRole("heading", { name: "Events", level: 2 })).toBeVisible();
+  });
+
+  test("people added on the People page sign in and see only their role's sections", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org");
+    await addPerson(page, "writer@example.org", "writer");
+    await addPerson(page, "reviewer@example.org", "writer", true);
+    await addPerson(page, "editor@example.org", "editor");
+    await signOut(page);
+
+    await signIn(page, "writer@example.org");
+    await expect(sections(page)).toHaveText([/Events/, /Articles/, /Blog/]);
+    await page.goto("/admin/people");
+    await expect(page.getByText("People is not part of your access")).toBeVisible();
+    await page.goto("/admin/herbreview");
+    await expect(page.getByText("Herb review is not part of your access")).toBeVisible();
+    await signOut(page);
+
+    await signIn(page, "reviewer@example.org");
+    await expect(sections(page)).toHaveText([/Herb review/, /Herb photos/, /Events/, /Articles/, /Blog/]);
+    await signOut(page);
+
+    await signIn(page, "editor@example.org");
+    await expect(sections(page)).toHaveText([/Events/, /Articles/, /Blog/, /Pages/, /History/, /Newsletters/]);
+    await page.goto("/admin/lists");
+    await expect(page.getByText("Mailing lists is not part of your access")).toBeVisible();
+  });
+
+  test("mailing lists: sign up, confirm, see it in admin, download, unsubscribe", async ({ page }) => {
+    // sign up in the newsletter box, choosing two lists
+    await page.goto("/innovate");
+    const box = page.locator("#newsletter");
+    await expect(box.getByLabel(/IBVU Monthly/)).toBeChecked();
+    await box.getByLabel(/Research & collaboration/).check();
+    await page.locator("#nl-email").fill("reader@example.org");
+    await page.locator("button.newsletter-submit").click();
+    await expect(page.getByText("Nearly there: please check your inbox.")).toBeVisible();
+    // the preview stands in for the email's Confirm button
+    await page.getByRole("link", { name: "Confirm now (preview)" }).click();
+    await expect(page).toHaveURL(/\/newsletter\/confirm\?t=/);
+    await expect(page.getByText("You'll receive: IBVU Monthly, Research & collaboration.")).toBeVisible();
+
+    // the contact form adds a business contact to the business list only if ticked
+    await page.goto("/contact");
+    await expect(page.getByText(/Send me occasional updates/)).toHaveCount(0);
+    await page.locator("#contact-name").fill("Bea Business");
+    await page.locator("#contact-email").fill("bea@example.org");
+    await page.locator("#contact-type").selectOption("advisory");
+    await expect(page.getByText("Send me occasional updates about Services for businesses", { exact: false })).toBeVisible();
+    await page.locator(".contact-updates input").check();
+    await page.locator("#contact-message").fill("We need a claims review.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(page.getByText(/confirm your subscription to Services for businesses/)).toBeVisible();
+
+    // admin: Messages and Mailing lists (Owners only)
+    await signIn(page, "hello@ibvu.org", "/admin/messages");
+    await expect(page.getByText("We need a claims review.")).toBeVisible();
+    await expect(page.getByText("Asked for updates")).toBeVisible();
+    await page.goto("/admin/lists");
+    await expect(page.locator(".cadmin-item-title", { hasText: "reader@example.org" })).toBeVisible();
+    await page.locator("#ls-status").selectOption("waiting");
+    await expect(page.locator(".cadmin-item-title", { hasText: "bea@example.org" })).toBeVisible();
+    await expect(page.getByText("Services for businesses: waiting to confirm")).toBeVisible();
+    await page.locator("#ls-list").selectOption("research");
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: /Download Research & collaboration as spreadsheet \(1\)/ }).click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/^ibvu-research-\d{4}-\d{2}-\d{2}\.csv$/);
+    const csv = readFileSync(await download.path(), "utf8");
+    expect(csv).toContain("reader@example.org");
+    expect(csv).not.toContain("bea@example.org");
+    expect(csv).toMatch(/\/unsubscribe\?t=/);
+
+    // the person's own unsubscribe link: leave one list
+    const link = csv.trim().split(/\r?\n/)[1].split(",").pop();
+    const path = link.replace(/^.*?(\/unsubscribe\?t=)/, "$1");
+    await page.goto(path);
+    await expect(page.getByText("reader@example.org")).toBeVisible();
+    await page.locator(".subscription-panel").getByLabel(/Research & collaboration/).uncheck();
+    await page.getByRole("button", { name: "Save my choices" }).click();
+    await expect(page.getByText("You'll now receive: IBVU Monthly.")).toBeVisible();
+  });
+
+  test("the old address ibvu.org/admin/content forwards to admin", async ({ page }) => {
+    await page.goto("/admin/content");
+    await expect(page).toHaveURL(/\/admin$/);
+  });
+
+  test("'Edit this page' shows only when signed in, and an edit appears on the page", async ({ page }) => {
+    await page.goto("/contact");
+    await expect(page.locator(".edit-page")).toHaveCount(0);
+
+    await signIn(page, "hello@ibvu.org");
+    await expect(sections(page)).toHaveCount(11);
+    await page.goto("/contact");
+    await page.getByRole("link", { name: /Edit this page/ }).click();
+    await expect(page).toHaveURL(/\/admin\/pages\?page=contact$/);
+
+    await page.locator("#pg-lead").fill("A test line written in admin.");
+    await page.getByRole("button", { name: "Publish changes" }).click();
+    await page.goto("/contact");
+    await expect(page.getByText("A test line written in admin.")).toBeVisible();
+
+    // Reset puts the original wording back.
+    await page.goto("/admin/pages?page=contact");
+    await page.getByRole("button", { name: "Reset to original" }).click();
+    await page.getByRole("button", { name: "Yes, reset" }).click();
+    await page.goto("/contact");
+    await expect(page.getByText("A test line written in admin.")).toHaveCount(0);
+  });
+
+  // Signs up one confirmed reader through the newsletter box.
+  async function confirmedReader(page, email) {
+    await page.goto("/innovate");
+    await page.locator("#nl-email").fill(email);
+    await page.locator("button.newsletter-submit").click();
+    await page.getByRole("link", { name: "Confirm now (preview)" }).click();
+    await expect(page.getByText(/You'll receive: IBVU Monthly/)).toBeVisible();
+  }
+
+  test("newsletters: write, add from the site, preview, test, send, record, archive", async ({ page }) => {
+    await confirmedReader(page, "reader@example.org");
+    await signIn(page, "hello@ibvu.org", "/admin/newsletters");
+    await expect(page.getByRole("heading", { name: "Newsletters", level: 2 })).toBeVisible();
+    await page.getByRole("button", { name: "New newsletter" }).click();
+    await page.locator("#nl-title").fill("November at IBVU");
+    await page.locator("#nl-subject").fill("RE: November at IBVU");
+    await page.locator("#nl-preview").fill("Herbs, events and what is next.");
+    await expect(page.getByLabel(/IBVU Monthly/)).toBeChecked();
+    await expect(page.getByLabel(/Show on the website once sent/)).toBeChecked();
+    await page.locator(".rte-content .ProseMirror").click();
+    await page.keyboard.type("Hello from the team.");
+    // a herb from the Herbarium, as a block with a link
+    await page.locator("#nl-add-kind").selectOption("herb");
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.locator(".rte-content a", { hasText: "Herbarium" })).toHaveCount(1);
+    await expect(page.getByText("Draft saved")).toBeVisible();
+    await noSidewaysScroll(page);
+
+    // previews
+    await page.getByRole("button", { name: "Preview as email" }).click();
+    await expect(page.locator(".nl-inbox-subject")).toHaveText("RE: November at IBVU");
+    await expect(page.frameLocator(".nl-email-frame").getByRole("heading", { name: "November at IBVU" })).toBeVisible();
+    await expect(page.frameLocator(".nl-email-frame").getByText("Hello from the team.")).toBeVisible();
+    await page.getByRole("button", { name: "Preview as web page" }).click();
+    await expect(page.locator(".cadmin-preview h1", { hasText: "November at IBVU" })).toBeVisible();
+
+    // test, then send
+    await page.getByRole("button", { name: "Send a test to me" }).click();
+    await expect(page.getByText(/In the preview no email is sent/)).toBeVisible();
+    await page.getByRole("button", { name: "Send now…" }).click();
+    await expect(page.getByText(/now to IBVU Monthly: 1 person\?/)).toBeVisible();
+    await page.getByRole("button", { name: "Yes, send it now" }).click();
+    await expect(page.getByText("Sent to 1 person.")).toBeVisible();
+    const record = page.locator(".nl-record");
+    await expect(record).toContainText("RE: November at IBVU");
+    await expect(record).toContainText("1 person");
+    await expect(record).toContainText("Owner");
+    await expect(page.locator(".nl-sends", { hasText: "reader@example.org" })).toBeVisible();
+    // a sent newsletter cannot be edited any more
+    await expect(page.locator("#nl-title")).toHaveCount(0);
+
+    // the archive on the site
+    await page.goto("/newsletter");
+    await page.getByRole("link", { name: /November at IBVU/ }).click();
+    await expect(page).toHaveURL(/\/newsletter\/november-at-ibvu$/);
+    await expect(page.getByRole("heading", { name: "November at IBVU" })).toBeVisible();
+    await expect(page.getByText("Hello from the team.")).toBeVisible();
+    await noSidewaysScroll(page);
+
+    // the person's record in Mailing lists
+    await page.goto("/admin/lists");
+    await expect(page.getByText("Newsletters received: 1")).toBeVisible();
+
+    // hide it from the website again; copy it to the Blog
+    await page.goto("/admin/newsletters");
+    await page.getByRole("button", { name: "Open" }).click();
+    await page.getByRole("button", { name: "Hide from the website" }).click();
+    await page.getByRole("button", { name: "Copy to Blog" }).click();
+    await expect(page.getByText(/A blog post draft was made/)).toBeVisible();
+    await page.goto("/newsletter");
+    await expect(page.getByText("The first issue is coming soon")).toBeVisible();
+    await page.goto("/admin/blog");
+    await expect(page.locator(".cadmin-item-title", { hasText: "November at IBVU" })).toBeVisible();
+  });
+
+  test("newsletters: schedule in UK time, cancel, and who may send", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org", "/admin/newsletters");
+    await page.getByRole("button", { name: "New newsletter" }).click();
+    await page.locator("#nl-title").fill("December issue");
+    await page.locator("#nl-subject").fill("December at IBVU");
+    await page.locator(".rte-content .ProseMirror").click();
+    await page.keyboard.type("See you next year.");
+    await page.getByRole("button", { name: "Schedule…" }).click();
+    await page.locator("#nl-when").fill("2020-01-01T09:00");
+    await page.getByRole("button", { name: "Schedule", exact: true }).click();
+    await expect(page.getByText("Choose a time at least 5 minutes from now.")).toBeVisible();
+    await page.locator("#nl-when").fill("2099-12-01T09:00");
+    await page.getByRole("button", { name: "Schedule", exact: true }).click();
+    await expect(page.getByText(/Scheduled for Tue, 1 Dec 2099, 09:00 UK time/).first()).toBeVisible();
+    await expect(page.locator("#nl-title")).toHaveCount(0);
+    await page.getByRole("button", { name: "← All newsletters" }).click();
+    await expect(page.locator(".cadmin-item", { hasText: "December issue" })).toContainText("Goes out Tue, 1 Dec 2099, 09:00 UK time");
+    await page.getByRole("button", { name: "Run the timer now" }).click();
+    await expect(page.getByText("Nothing is due yet.")).toBeVisible();
+    await page.getByRole("button", { name: "Open" }).click();
+    await page.getByRole("button", { name: "Cancel the schedule" }).click();
+    await expect(page.getByText(/The schedule is cancelled/)).toBeVisible();
+    await expect(page.locator("#nl-title")).toHaveValue("December issue");
+
+    // Editors write and test, but cannot send or schedule; Writers have no Newsletters
+    await addPerson(page, "editor@example.org", "editor");
+    await addPerson(page, "writer@example.org", "writer");
+    await signOut(page);
+    await signIn(page, "editor@example.org", "/admin/newsletters");
+    await page.getByRole("button", { name: "Edit" }).click();
+    await expect(page.getByRole("button", { name: "Send a test to me" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send now…" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Schedule…" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Reminders" })).toHaveCount(0);
+    await signOut(page);
+    await signIn(page, "writer@example.org", "/admin/newsletters");
+    await expect(page.getByText("Newsletters is not part of your access")).toBeVisible();
+  });
+
+  test("newsletter reminders: Owners keep the list and choose the reminders", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org", "/admin/newsletters");
+    await page.getByRole("tab", { name: "Reminders" }).click();
+    await expect(page.getByText(/Nobody yet/)).toBeVisible();
+    await page.locator("#rm-email").fill("team@example.org");
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.locator(".nl-sends", { hasText: "team@example.org" })).toBeVisible();
+    for (const label of [/A newsletter is due/, /A scheduled newsletter goes out soon/, /A newsletter has been sent/]) {
+      await expect(page.getByLabel(label)).toBeChecked();
+    }
+    await expect(page.getByLabel("Day of the month")).toHaveValue("25");
+    await page.getByLabel("Day of the month").selectOption("20");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+    await page.reload();
+    await page.getByRole("tab", { name: "Reminders" }).click();
+    await expect(page.getByLabel("Day of the month")).toHaveValue("20");
+    await page.getByRole("button", { name: "Remove" }).click();
+    await page.getByRole("button", { name: "Yes, remove" }).click();
+    await expect(page.locator(".nl-sends", { hasText: "team@example.org" })).toHaveCount(0);
+    await noSidewaysScroll(page);
+  });
+
+  test("draft changes: live items stay as they are until the changes are published", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org", "/admin/articles");
+    // publish the example article
+    await page.getByRole("button", { name: "Edit" }).first().click();
+    await page.locator("#ar-title").fill("Live title");
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await page.getByRole("button", { name: "Close" }).click();
+    // change it, but only as draft changes
+    await page.locator("#ar-title").fill("Changed title");
+    await page.getByRole("button", { name: "Save as draft changes" }).click();
+    await expect(page.locator(".cadmin-save-state")).toHaveText("Draft changes saved");
+    await page.getByRole("button", { name: "← All articles" }).click();
+    await expect(page.locator(".cadmin-item", { hasText: "Live title" })).toContainText("Changes waiting");
+    await page.goto("/media");
+    await expect(page.getByRole("heading", { name: "Live title" })).toBeVisible();
+    await expect(page.getByText("Changed title")).toHaveCount(0);
+
+    // a Writer can open the live article and suggest changes
+    await addPerson(page, "writer@example.org", "writer");
+    await signOut(page);
+    await signIn(page, "writer@example.org", "/admin/articles");
+    await page.locator(".cadmin-item", { hasText: "Live title" }).getByRole("button", { name: "Suggest changes" }).click();
+    await expect(page.locator("#ar-title")).toHaveValue("Changed title");
+    await expect(page.getByRole("button", { name: "Publish changes" })).toHaveCount(0);
+    await page.locator("#ar-title").fill("Writer's title");
+    await page.getByRole("button", { name: "Save as draft changes" }).click();
+    await signOut(page);
+
+    // an Owner publishes them
+    await signIn(page, "hello@ibvu.org", "/admin/articles");
+    await page.locator(".cadmin-item", { hasText: "Live title" }).getByRole("button", { name: "Edit" }).click();
+    await expect(page.getByText(/You are looking at draft changes saved by Writer/)).toBeVisible();
+    await page.getByRole("button", { name: "Publish changes" }).click();
+    await page.getByRole("button", { name: "← All articles" }).click();
+    await expect(page.locator(".cadmin-item", { hasText: "Writer's title" })).not.toContainText("Changes waiting");
+    await page.goto("/media");
+    await expect(page.getByRole("heading", { name: "Writer's title" })).toBeVisible();
+
+    // pages: draft wording is only shown to admin people who switch it on
+    await page.goto("/admin/pages?page=contact");
+    await page.locator("#pg-lead").fill("Draft wording for Contact.");
+    await page.getByRole("button", { name: "Save as draft changes" }).click();
+    await expect(page.locator(".cadmin-subtabs button", { hasText: "Contact •" })).toBeVisible();
+    await page.goto("/contact");
+    await expect(page.getByText("Draft wording for Contact.")).toHaveCount(0);
+    await page.getByRole("button", { name: "Show draft changes" }).click();
+    await expect(page.getByText("Draft wording for Contact.")).toBeVisible();
+    await page.getByRole("button", { name: "Showing draft changes" }).click();
+    await expect(page.getByText("Draft wording for Contact.")).toHaveCount(0);
+    await page.goto("/admin/pages?page=contact");
+    await page.getByRole("button", { name: "Discard draft changes" }).click();
+    await page.getByRole("button", { name: "Yes, discard" }).click();
+    await expect(page.locator("#pg-lead")).not.toHaveValue("Draft wording for Contact.");
+  });
+
+  test("every page has a form in admin", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org");
+    await expect(sections(page)).toHaveCount(11);
+    await page.goto("/admin/pages");
+    await expect(page.locator(".cadmin-subtabs button")).toHaveText(["Home", "About", "Regulate", "Herbarium", "Media and Blog", "Shop", "Innovate", "Contact", "Privacy", "Newsletter and footer"]);
+    for (const key of ["home", "about", "regulate", "herbarium", "writing", "shop", "innovate", "contact", "privacy", "site"]) {
+      await page.goto("/admin/pages?page=" + key);
+      await expect(page.locator(".cadmin-card").first()).toBeVisible();
+      await noSidewaysScroll(page);
+    }
+  });
+});

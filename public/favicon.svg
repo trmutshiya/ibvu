@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- IBVU v5.7: browser-tab icon. A simple sprig in the site's gold on its dark earth colour. Replace this file to change the icon. -->
+  <rect width="64" height="64" rx="12" fill="#1C0D06"/>
+  <g fill="none" stroke="#C9A84C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 54V20"/>
+    <path d="M32 30c-9-1-14-7-15-15 9 1 14 7 15 15z" fill="#C9A84C" fill-opacity="0.25"/>
+    <path d="M32 40c9-1 14-7 15-15-9 1-14 7-15 15z" fill="#C9A84C" fill-opacity="0.25"/>
+    <path d="M32 20c-3-4-3-8 0-12 3 4 3 8 0 12z" fill="#C9A84C" fill-opacity="0.25"/>
+  </g>
+</svg>

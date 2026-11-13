@@ -1,8 +1,17 @@
-import { useState } from 'react';
+// IBVU v5.9 — what changed in this file since v5.7:
+// - This screen no longer has its own sign-in. The one admin sign-in at
+//   ibvu.org/admin now comes first (see src/lib/auth.js), so the email and
+//   code boxes that used to be here are removed.
+// - It no longer saves the admin's email address on herb records or in the
+//   edit log. It saves the person's role (for example "Owner") instead, so no
+//   email address ends up where the public could read it.
+// - Review, publish, edit, unpublish and export are unchanged.
+// (v5.7: this screen moved to ibvu.org/admin/herbreview.)
+import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx-js-style';
 import { HERBS_FALLBACK } from '../constants/herbs.js';
 import {
-  SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_READY, SUBMISSIONS_KEY,
+  SUPABASE_READY, SUBMISSIONS_KEY,
   sbFetch, sbFetchApprovedFull, sbFetchStaticHerbs,
   sbUpdateReviewStatus, sbMarkEmailed, sbUnpublishHerb,
 } from '../lib/supabase.js';
@@ -10,15 +19,8 @@ import { gbifEnrich, sendApprovalEmail } from '../lib/edge.js';
 import CompletionPanel from './CompletionPanel.jsx';
 import EditPanel from './EditPanel.jsx';
 
-export default function AdminPanel({ onBack }) {
-  const [auth, setAuth]               = useState(false);
-  const [adminEmail, setAdminEmail]   = useState("");
-  const [otpStep, setOtpStep]         = useState("email");
-  const [otpEmail, setOtpEmail]       = useState("");
-  const [otpCode, setOtpCode]         = useState("");
-  const [otpSending, setOtpSending]   = useState(false);
-  const [otpVerifying, setOtpVerifying] = useState(false);
-  const [otpMsg, setOtpMsg]           = useState("");
+// adminLabel is what gets recorded as "changed by": the role, never an email address.
+export default function AdminPanel({ onBack, adminLabel = "Admin" }) {
   const [subs, setSubs]               = useState([]);
   const [tab, setTab]                 = useState("pending");
   const [completing, setCompleting]   = useState(null);
@@ -51,47 +53,12 @@ export default function AdminPanel({ onBack }) {
     enrichAll(rows);
   }
 
-  async function sendOtp() {
-    if (!otpEmail) { setOtpMsg("Please enter your email address."); return; }
-    setOtpSending(true); setOtpMsg("");
-    try {
-      const res = await fetch(SUPABASE_URL + "/auth/v1/otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
-        body: JSON.stringify({ email: otpEmail, options: { shouldCreateUser: false } }),
-      });
-      if (!res.ok) {
-        const d = await res.json();
-        setOtpMsg(d.msg || d.error_description || "Failed to send code. Check the email address.");
-      } else {
-        setOtpStep("code");
-      }
-    } catch { setOtpMsg("Network error. Try again."); }
-    setOtpSending(false);
-  }
-
-  async function verifyOtp() {
-    if (!otpCode || otpCode.length < 4) { setOtpMsg("Enter the login code from your email."); return; }
-    setOtpVerifying(true); setOtpMsg("");
-    try {
-      const res = await fetch(SUPABASE_URL + "/auth/v1/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
-        body: JSON.stringify({ type: "email", token: otpCode, email: otpEmail }),
-      });
-      if (!res.ok) {
-        const d = await res.json();
-        setOtpMsg(d.msg || d.error_description || "Invalid or expired code. Try again.");
-      } else {
-        setAuth(true);
-        setAdminEmail(otpEmail);
-        await loadSubs();
-        sbFetchApprovedFull().then(rows => setApprovedHerbsList(rows)).catch(() => {});
-        sbFetchStaticHerbs().then(rows => { if (rows.length > 0) setStaticHerbsList(rows); }).catch(() => {});
-      }
-    } catch { setOtpMsg("Network error. Try again."); }
-    setOtpVerifying(false);
-  }
+  // Load everything as soon as the screen opens (the person is already signed in).
+  useEffect(() => {
+    loadSubs();
+    sbFetchApprovedFull().then(rows => setApprovedHerbsList(rows)).catch(() => {});
+    sbFetchStaticHerbs().then(rows => { if (rows.length > 0) setStaticHerbsList(rows); }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleReject(sub) {
     if (!window.confirm("Reject submission for " + sub.name + "?")) return;
@@ -188,58 +155,6 @@ export default function AdminPanel({ onBack }) {
     dupNameCount[key] = (dupNameCount[key] || 0) + 1;
   });
 
-  if (!auth) {
-    return (
-      <div className="admin-login-wrap">
-        <div className="admin-login-box">
-          <h2>Admin Access</h2>
-          <p>Herbarium Scientifica — Submission Review</p>
-          {otpStep === "email" ? (
-            <>
-              <input
-                type="email"
-                value={otpEmail}
-                onChange={e => setOtpEmail(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && sendOtp()}
-                placeholder="Admin email address"
-                autoComplete="email"
-              />
-              {otpMsg && <div className="error-msg">{otpMsg}</div>}
-              <button className="admin-login-btn" onClick={sendOtp} disabled={otpSending}>
-                {otpSending ? "Sending…" : "Send Login Code →"}
-              </button>
-            </>
-          ) : (
-            <>
-              <p style={{fontSize:"0.8rem",color:"var(--sage)",marginBottom:"16px"}}>
-                Code sent to {otpEmail}
-              </p>
-              <input
-                type="text"
-                maxLength={10}
-                value={otpCode}
-                onChange={e => setOtpCode(e.target.value.trim())}
-                onKeyDown={e => e.key === "Enter" && verifyOtp()}
-                placeholder="Login code"
-                style={{letterSpacing:"6px", textAlign:"center", fontSize:"1.2rem"}}
-                autoFocus
-              />
-              {otpMsg && <div className="error-msg">{otpMsg}</div>}
-              <button className="admin-login-btn" onClick={verifyOtp} disabled={otpVerifying}>
-                {otpVerifying ? "Verifying…" : "Verify Code →"}
-              </button>
-              <button className="admin-back-link" style={{marginBottom:"8px"}}
-                onClick={() => { setOtpStep("email"); setOtpMsg(""); setOtpCode(""); }}>
-                ← Different email
-              </button>
-            </>
-          )}
-          <button className="admin-back-link" onClick={onBack}>← Back to Herbarium</button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="admin-shell">
       <div className="admin-wrap">
@@ -261,7 +176,7 @@ export default function AdminPanel({ onBack }) {
               }}>↻ Refresh</button>
             )}
             <button className="admin-btn solid" onClick={exportExcel}>↓ Export to Excel</button>
-            <button className="admin-btn outline" onClick={onBack}>← Exit Admin</button>
+            <button className="admin-btn outline" onClick={onBack}>← Admin home</button>
           </div>
         </div>
 
@@ -348,7 +263,7 @@ export default function AdminPanel({ onBack }) {
                         <button className="reject-btn" onClick={async () => {
                           if (!window.confirm("Unpublish " + h.name + "?")) return;
                           try {
-                            await sbUnpublishHerb(h.id, h.name, adminEmail);
+                            await sbUnpublishHerb(h.id, h.name, adminLabel);
                             setApprovedHerbsList(prev => prev.filter(x => x.id !== h.id));
                           } catch (err) { alert("Unpublish failed: " + err.message); }
                         }}>✕ Unpublish</button>
@@ -448,7 +363,7 @@ export default function AdminPanel({ onBack }) {
             submission={completing}
             onPublish={handlePublished}
             onCancel={() => setCompleting(null)}
-            adminEmail={adminEmail}
+            adminEmail={adminLabel}
           />
         )}
 
@@ -456,7 +371,7 @@ export default function AdminPanel({ onBack }) {
           <EditPanel
             herb={editing}
             isStatic={editingIsStatic}
-            adminEmail={adminEmail}
+            adminEmail={adminLabel}
             onSave={handleSaved}
             onCancel={() => { setEditing(null); setEditingIsStatic(false); }}
           />

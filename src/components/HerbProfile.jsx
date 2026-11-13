@@ -1,6 +1,18 @@
+// IBVU v5.92 — what changed in this file: the share link uses the herb's own address (herb.slug).
+//
+// IBVU v5.9 — what changed in this file: the line under a herb photo now comes from admin → Pages → Herbarium (same wording as before until edited).
+//
+// IBVU v5.7 — what changed in this file: an approved photo of the herb, when
+// there is one, is shown under the heading with a small "educational purposes"
+// line beneath it. Share buttons (LinkedIn, WhatsApp, copy link) sit at the
+// foot of the herb's page. Nothing else changed.
 import ScientificSection from './ScientificSection.jsx';
+import { useHerbPhoto, herbKey, usePage } from '../lib/content.js';
+import { ShareButtons } from './Share.jsx';
 
 export default function HerbProfile({ herb, conditionId, onBack }) {
+  const photo = useHerbPhoto(herb.name);
+  const words = usePage("herbarium");
   return (
     <div>
       <button className="back-btn" onClick={onBack}>← All Herbs</button>
@@ -14,6 +26,12 @@ export default function HerbProfile({ herb, conditionId, onBack }) {
           </div>
         </div>
       </div>
+      {photo && (
+        <figure className="herb-photo">
+          <img src={photo} alt={"Photo of " + herb.name} />
+          {words.photoCaption && <figcaption>{words.photoCaption}</figcaption>}
+        </figure>
+      )}
       <div className="sections">
         <div className="section">
           <div className="section-header"><span className="section-icon">☿</span><span className="section-label">Identity</span></div>
@@ -54,6 +72,7 @@ export default function HerbProfile({ herb, conditionId, onBack }) {
           <div className="section-body"><ScientificSection herb={herb} conditionId={conditionId} /></div>
         </div>
       </div>
+      <ShareButtons path={"/educate/hs/" + (herb.slug || herbKey(herb.name))} text={herb.name + " in the IBVU Herbarium Scientifica"} label="Share this herb" />
     </div>
   );
 }

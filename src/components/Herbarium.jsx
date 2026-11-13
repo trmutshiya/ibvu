@@ -1,4 +1,16 @@
+// IBVU v5.92 — what changed in this file: herbs published twice no longer share one address (see src/lib/herbs.js).
+//
+// IBVU v5.9 — what changed in this file: the line under the title and the two tab labels now come from admin → Pages → Herbarium (same wording as before until edited).
+//
+// IBVU v5.7 — what changed in this file since v5.3:
+// - Every herb has its own page and address: ibvu.org/educate/hs/herb-name.
+//   The submission form is at ibvu.org/educate/hs/submit. The browser's back
+//   button and shared links now work for individual herbs.
+// - The small dot at the bottom of the page that opened admin is removed.
+//   Admin is reached at ibvu.org/admin.
+// - Search, filters, sorting and paging are unchanged.
 import { useState, useEffect } from 'react';
+import { Link, useParams, useLocation, useNavigate } from 'react-router-dom';
 import { HERBS_FALLBACK } from '../constants/herbs.js';
 import { CONDITION_GROUPS } from '../constants/conditions.js';
 import { sbFetchApproved, sbFetchStaticHerbs } from '../lib/supabase.js';
@@ -7,31 +19,50 @@ import HerbCard from './HerbCard.jsx';
 import HerbProfile from './HerbProfile.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import SubmitForm from './SubmitForm.jsx';
+import SiteHeader from './SiteHeader.jsx';
+import SiteFooter from './SiteFooter.jsx';
+import { usePageTitle } from '../lib/site.js';
+import { usePage } from '../lib/content.js';
+import { mergeHerbs } from '../lib/herbs.js';
 
 const HERBS_PER_PAGE = 24;
 
-export default function Herbarium({ onBack, onAdmin }) {
-  const [tab, setTab]                         = useState("browse");
+export default function Herbarium() {
+  // The address decides what is shown:
+  //   /educate/hs            the catalogue
+  //   /educate/hs/submit     the submission form
+  //   /educate/hs/herb-name  one herb's page
+  const c = usePage("herbarium");
+  const { slug } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const tab = slug === "submit" ? "submit" : "browse";
+  const herbSlug = slug && slug !== "submit" ? slug : null;
+  const [loaded, setLoaded]                   = useState(false);
   const [approvedHerbs, setApprovedHerbs]     = useState([]);
   const [staticHerbs, setStaticHerbs]         = useState(HERBS_FALLBACK);
-  const [selected, setSelected]               = useState(null);
-  const [selectedCondition, setSelectedCondition] = useState(null);
   const [query, setQuery]                     = useState("");
   const [activeCondition, setActiveCondition] = useState(null);
   const [sortMode, setSortMode]               = useState("default");
   const [herbPage, setHerbPage]               = useState(1);
 
   useEffect(function() {
-    sbFetchApproved().then(rows => setApprovedHerbs(rows));
-    sbFetchStaticHerbs().then(rows => { if (rows.length > 0) setStaticHerbs(rows); });
+    Promise.all([
+      sbFetchApproved().then(rows => setApprovedHerbs(rows)),
+      sbFetchStaticHerbs().then(rows => { if (rows.length > 0) setStaticHerbs(rows); }),
+    ]).finally(() => setLoaded(true));
   }, []);
 
-  // Deduplication: if a static herb was promoted to Supabase, use the Supabase version
-  const approvedNames = new Set(approvedHerbs.map(h => h.name.toLowerCase().trim()));
-  const herbs = [
-    ...staticHerbs.filter(h => !approvedNames.has(h.name.toLowerCase().trim())),
-    ...approvedHerbs,
-  ];
+  // Built-in herbs plus approved ones, each with its own address (herb.slug).
+  const herbs = mergeHerbs(staticHerbs, approvedHerbs);
+
+  // The herb whose page is open (if any), found by its address.
+  const selected = herbSlug ? herbs.find(h => h.slug === herbSlug) : null;
+  const selectedCondition = (location.state && location.state.condition) || null;
+  usePageTitle(
+    selected ? selected.name : tab === "submit" ? "Submit an herb" : "Herbarium Scientifica",
+    selected ? selected.name + (selected.latinName ? " (" + selected.latinName + "). " : ". ") + (selected.description || "") : "A community-powered catalogue of medicinal plants with evidence-based literature."
+  );
 
   const conditionFiltered = activeCondition
     ? herbs.filter(h => (h.conditions || []).includes(activeCondition))
@@ -67,25 +98,36 @@ export default function Herbarium({ onBack, onAdmin }) {
 
   return (
     <div className="herb-shell">
-      <button className="back-to-ibvu" onClick={onBack}>← ibvu</button>
+      <SiteHeader />
+
       <div className="herb-app">
         <div className="herb-header">
-          <h1>Herbarium<br />Scientifica</h1>
-          <p>A community-powered catalogue of medicinal plants with evidence-based literature</p>
+          {/* On a herb's own page the herb name is the main heading. */}
+          {herbSlug
+            ? <Link className="herb-title-link" to="/educate/hs"><span className="herb-title">Herbarium<br />Scientifica</span></Link>
+            : <h1>Herbarium<br />Scientifica</h1>}
+          <p>{c.lead}</p>
         </div>
-        {!selected && (
+        {!herbSlug && (
           <nav className="herb-nav">
-            <button className={tab === "browse" ? "active" : ""} onClick={() => setTab("browse")}>Browse Herbs</button>
-            <button className={tab === "submit" ? "active" : ""} onClick={() => setTab("submit")}>Submit an Herb</button>
+            <Link className={tab === "browse" ? "active" : ""} to="/educate/hs">{c.browseLabel}</Link>
+            <Link className={tab === "submit" ? "active" : ""} to="/educate/hs/submit">{c.submitLabel}</Link>
           </nav>
         )}
 
-        {selected ? (
-          <HerbProfile
-            herb={selected}
-            conditionId={selectedCondition}
-            onBack={() => { setSelected(null); setSelectedCondition(null); }}
-          />
+        {herbSlug ? (
+          selected ? (
+            <HerbProfile
+              herb={selected}
+              conditionId={selectedCondition}
+              onBack={() => navigate("/educate/hs")}
+            />
+          ) : (
+            <div className="empty-state">
+              <p>{loaded ? "We could not find that herb." : "Loading…"}</p>
+              {loaded && <p style={{ marginTop: 16 }}><Link className="page-back" to="/educate/hs">← All Herbs</Link></p>}
+            </div>
+          )
         ) : tab === "browse" ? (
           <div className="browse-layout">
             <ConditionSidebar
@@ -137,10 +179,7 @@ export default function Herbarium({ onBack, onAdmin }) {
                 <>
                   <div className="herb-grid">
                     {pagedHerbs.map(h => (
-                      <HerbCard key={h.id} herb={h} onClick={herb => {
-                        setSelected(herb);
-                        setSelectedCondition(activeCondition);
-                      }} />
+                      <HerbCard key={h.slug} herb={h} conditionId={activeCondition} />
                     ))}
                   </div>
                   {totalPages > 1 && (
@@ -160,10 +199,9 @@ export default function Herbarium({ onBack, onAdmin }) {
           </ErrorBoundary>
         )}
 
-        <div className="herb-footer">
-          <button className="admin-trigger" onClick={onAdmin} title="">·</button>
-        </div>
       </div>
+
+      <SiteFooter disclaimer />
     </div>
   );
 }
