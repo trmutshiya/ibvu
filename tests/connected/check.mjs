@@ -1,3 +1,6 @@
+// IBVU v6.07 — what changed in this file: pages open with a cookie choice already made.
+// IBVU v6.06 — what changed in this file: the approved herb photo is checked as a tile
+// beside the name and on its card in the list.
 // IBVU v6.05 — what changed in this file: the framing window is used with its buttons.
 // IBVU v6.04 — what changed in this file: the event picture is framed (zoom in) in
 // the framing window, and the framing is saved with it and shown to visitors.
@@ -35,6 +38,7 @@ const TURNSTILE_STUB = () => {
     reset() {}, remove(id) { delete ws[id]; },
   };
   try { sessionStorage.setItem('ibvu_intro_played', '1'); } catch {}
+  try { if (!localStorage.getItem('ibvu_cookie_consent_v1')) localStorage.setItem('ibvu_cookie_consent_v1', 'denied'); } catch {}
 };
 
 async function newPage(browser, w = 1280, h = 900) {
@@ -352,9 +356,12 @@ export async function check() {
   await v2.page.waitForSelector('text=Welcome to the newsletter.', { timeout: 10000 });
   ok('newsletter issue opens by its address', true);
   await v2.page.goto(B + '/educate/hs/ginger');
-  await v2.page.waitForSelector('.herb-photo img', { timeout: 10000 });
-  await v2.page.waitForFunction(() => { const i = document.querySelector('.herb-photo img'); return i && i.complete; }, null, { timeout: 10000 });
-  ok('visitor sees the approved herb photo', await v2.page.locator('.herb-photo img').evaluate(i => i.naturalWidth > 0), await v2.page.locator('.herb-photo img').getAttribute('src'));
+  await v2.page.waitForSelector('.herb-thumb img', { timeout: 10000 });
+  await v2.page.waitForFunction(() => { const i = document.querySelector('.herb-thumb img'); return i && i.complete; }, null, { timeout: 10000 });
+  ok('visitor sees the approved herb photo as a tile beside the name', await v2.page.locator('.herb-thumb img').evaluate(i => i.naturalWidth > 0), await v2.page.locator('.herb-thumb img').getAttribute('src'));
+  await v2.page.goto(B + '/educate/hs');
+  await v2.page.waitForSelector('.herb-card.has-photo .herb-card-thumb img', { timeout: 10000 });
+  ok('…and as a small tile on its card in the Herbarium list', await v2.page.locator('.herb-card.has-photo').count() === 1);
   ok('no "Edit this page" for visitors', await v2.page.locator('.edit-page').count() === 0);
   ok('visitor drafts hidden', !(await v2.page.content()).includes('FAIL-ME'));
   await v2.page.goto(B + '/media/does-not-exist');

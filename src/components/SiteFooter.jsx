@@ -1,3 +1,6 @@
+// IBVU v6.07 — what changed in this file: "Cookie settings" next to Privacy at the foot of the page, and a newsletter
+// sign-up is counted in Google Analytics (only with consent; no email address is sent).
+//
 // IBVU v6.04 — what changed in this file: the footer logo is shown as framed in admin.
 //
 // IBVU v6.03 — what changed in this file: a "Read past issues" link under the newsletter sign-up.
@@ -25,6 +28,8 @@
 // - PREVIEW MODE: the sign-up is not sent or saved yet (see src/lib/messages.js).
 // Unchanged: the small disclaimer shows only where `disclaimer` is switched on
 // (the Educate pages), and the footer line.
+import { openCookieSettings } from './CookieBar.jsx';
+import { track } from '../lib/analytics.js';
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { subscribeToNewsletter, isEmail } from '../lib/messages.js';
@@ -77,6 +82,7 @@ function Newsletter() {
     setResult(r);
     if (!r.ok) setFailure(r.error || "");
     setStatus(r.ok ? "done" : "failed");
+    if (r.ok) track("newsletter_sign_up", { lists: lists.join(","), page: window.location.pathname });
   }
 
   return (
@@ -156,7 +162,7 @@ export default function SiteFooter({ disclaimer = false }) {
           )}
 
           <div className="footer-bottom">{c.footerLine}</div>
-          <p className="footer-links"><Link to="/privacy">Privacy</Link></p>
+          <p className="footer-links"><Link to="/privacy">Privacy</Link><span aria-hidden="true"> · </span><button type="button" className="footer-link-btn" onClick={openCookieSettings}>Cookie settings</button></p>
         </div>
       </footer>
     </>

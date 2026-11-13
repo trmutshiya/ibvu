@@ -1,3 +1,6 @@
+// IBVU v6.06 — what changed in this file: the full-screen picture view (Lightbox) is
+// shared with the herb pages.
+//
 // IBVU v6.05 — what changed in this file: a picture whose size was set by
 // dragging keeps that size when it has a caption.
 //
@@ -54,8 +57,8 @@ function withCaptions(html) {
   return doc.body.firstChild.innerHTML;
 }
 
-// Full-screen view of a picture.
-function Lightbox({ src, alt, onClose }) {
+// Full-screen view of a picture (also used on herb pages).
+export function Lightbox({ src, alt, onClose }) {
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);

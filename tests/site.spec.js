@@ -1,3 +1,15 @@
+// IBVU v6.08 — what changed in this file: the cookie bar check uses the new wording
+// (Accept All, Reject All, Cookie Policy).
+//
+// IBVU v6.07 — what changed in this file since v6.06: every check starts with a cookie
+// choice already made (so the cookie bar does not cover the page), and a new check covers
+// the cookie bar, "Cookie settings", the Privacy section and that nothing is sent to Google
+// away from ibvu.org.
+//
+// IBVU v6.06 — what changed in this file since v6.05: checks herb photo tiles (square,
+// beside the name, about 190 px; on the Herbarium card about 64 px), the full-screen
+// photo and Related herbs.
+//
 // IBVU v6.05 — what changed in this file since v6.04: the framing window is used by
 // dragging (move the picture, drag a corner to resize, Larger / Smaller buttons, never
 // smaller than the box); pictures in the text are resized by dragging their handles,
@@ -54,6 +66,39 @@
 import { test, expect } from '@playwright/test';
 import { mergeHerbs } from '../src/lib/herbs.js';
 import { readFileSync } from 'node:fs';
+
+// The cookie bar is checked on its own ("cookie bar" below); elsewhere a choice is already made.
+test.beforeEach(async ({ page }, info) => {
+  if (!/cookie bar/.test(info.title)) await page.addInitScript(() => { try { localStorage.setItem("ibvu_cookie_consent_v1", "denied"); } catch {} });
+});
+
+test("cookie bar: asks once, Accept and Reject, Cookie settings, nothing sent off ibvu.org", async ({ page }) => {
+  const google = [];
+  page.on("request", r => { if (/googletagmanager|google-analytics/.test(r.url())) google.push(r.url()); });
+  await page.goto("/");
+  const bar = page.getByRole("region", { name: "Cookie choice" });
+  await expect(bar).toBeVisible();
+  await expect(bar.getByRole("button", { name: "Reject All" })).toBeVisible();
+  await expect(bar.getByRole("link", { name: "Cookie Policy" })).toHaveAttribute("href", "/privacy#analytics-and-cookies");
+  await expect(bar).toContainText("You can accept or reject non-essential cookies.");
+  await bar.getByRole("button", { name: "Accept All" }).click();
+  await expect(bar).toHaveCount(0);
+  await page.goto("/educate/hs");
+  await expect(page.getByRole("region", { name: "Cookie choice" })).toHaveCount(0);   // asked only once
+  expect(google).toEqual([]);                                                          // only ibvu.org sends anything
+  // change the choice from the footer
+  await page.getByRole("button", { name: "Cookie settings" }).click();
+  await expect(page.getByRole("region", { name: "Cookie choice" })).toContainText("You chose: Accept All.");
+  await page.getByRole("button", { name: "Reject All" }).click();
+  expect(await page.evaluate(() => localStorage.getItem("ibvu_cookie_consent_v1"))).toBe("denied");
+  // the Privacy page explains it
+  await page.goto("/privacy");
+  await expect(page.getByRole("heading", { name: "Analytics and cookies" })).toBeVisible();
+  // never in admin
+  await page.evaluate(() => localStorage.removeItem("ibvu_cookie_consent_v1"));
+  await page.goto("/admin");
+  await expect(page.getByRole("region", { name: "Cookie choice" })).toHaveCount(0);
+});
 
 const PAGES = [
   ["/", "home"], ["/regulate", "Regulate"], ["/educate/hs", "Herbarium"], ["/educate/hs/submit", "Submit"], ["/educate/blog", "Blog"],
@@ -755,6 +800,42 @@ test.describe("admin (sign-in and roles)", () => {
     await cover.click();
     await expect(page.getByRole("dialog", { name: "Picture, full size" })).toBeVisible();
     await page.getByRole("button", { name: "Close" }).click();
+    await noSidewaysScroll(page);
+  });
+
+  test("herb photos: square tiles on the herb page and the list, related herbs", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org", "/admin/herbphotos");
+    const row = page.locator(".cadmin-item", { hasText: "Ashwagandha" });
+    await row.locator("input[type=file]").setInputFiles("src/assets/pillar-educate.jpg");
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText("Herb photo (herb page and Herbarium list)").first()).toBeVisible();
+    await dialog.getByRole("button", { name: "Save" }).click();
+    await expect(dialog).toHaveCount(0);
+
+    // the herb page: a square tile beside the name
+    await page.goto("/educate/hs/ashwagandha");
+    const tile = page.locator(".profile-header .herb-thumb-btn");
+    await expect(tile).toBeVisible();
+    const box = await tile.boundingBox();
+    expect(Math.abs(box.width - box.height)).toBeLessThan(2);
+    expect(box.width).toBeLessThanOrEqual(page.viewportSize().width > 640 ? 192 : 112);
+    await expect(page.getByText("Image for educational purposes only.")).toBeVisible();
+    await tile.click();
+    await expect(page.getByRole("dialog", { name: "Picture, full size" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    // related herbs
+    await expect(page.getByRole("heading", { name: "Related herbs" })).toBeVisible();
+    const related = page.locator(".related-grid .herb-card");
+    expect(await related.count()).toBeGreaterThan(0);
+    expect(await related.count()).toBeLessThanOrEqual(4);
+    await expect(page.locator(".related-grid").getByText("Ashwagandha", { exact: true })).toHaveCount(0);
+    await noSidewaysScroll(page);
+
+    // the list: a small tile on that card only
+    await page.goto("/educate/hs");
+    await expect(page.locator(".herb-card.has-photo")).toHaveCount(1);
+    const thumb = await page.locator(".herb-card.has-photo .herb-card-thumb").boundingBox();
+    expect(Math.round(thumb.width)).toBe(64);
     await noSidewaysScroll(page);
   });
 

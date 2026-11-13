@@ -1,3 +1,6 @@
+// IBVU v6.06 — what changed in this file: the herb page gets the whole herb list, for
+// its Related herbs.
+//
 // IBVU v5.92 — what changed in this file: herbs published twice no longer share one address (see src/lib/herbs.js).
 //
 // IBVU v5.9 — what changed in this file: the line under the title and the two tab labels now come from admin → Pages → Herbarium (same wording as before until edited).
@@ -119,6 +122,7 @@ export default function Herbarium() {
           selected ? (
             <HerbProfile
               herb={selected}
+              herbs={herbs}
               conditionId={selectedCondition}
               onBack={() => navigate("/educate/hs")}
             />

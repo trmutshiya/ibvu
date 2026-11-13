@@ -1,3 +1,6 @@
+// IBVU v6.07 — what changed in this file: a sent message is counted in Google Analytics (only with consent; only the
+// enquiry type, never the name, email address or message).
+//
 // IBVU v6.02 — what changed in this file since v6.0: an optional tick, "Send
 // me occasional updates about …", which appears once an enquiry type is
 // chosen. It adds the person (after they confirm by email) to the mailing list
@@ -16,6 +19,7 @@
 //
 // PREVIEW MODE: the form checks what is typed and shows the thank-you screen,
 // but nothing is sent yet (see src/lib/messages.js).
+import { track } from '../lib/analytics.js';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import SiteHeader from './SiteHeader.jsx';
@@ -72,6 +76,7 @@ export default function Contact() {
     setSent(result);
     if (!result.ok) setFailure(result.error || "");
     setStatus(result.ok ? "sent" : "failed");
+    if (result.ok) track("contact_sent", { enquiry_type: form.type || "none" });
   }
 
   return (

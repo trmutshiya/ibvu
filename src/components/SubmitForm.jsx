@@ -1,3 +1,6 @@
+// IBVU v6.07 — what changed in this file: a herb submission is counted in Google Analytics (only with consent; no
+// details of the submission are sent).
+//
 // IBVU v6.0 — what changed in this file since v5.9:
 // - A photo sent with a herb now really reaches admin. It goes to the server
 //   together with the form's security check, is checked to be a real picture
@@ -17,6 +20,7 @@
 // - In the preview build (no database connection) the literature check is
 //   skipped and the form says so, so the form can be tried end to end.
 // Everything else (fields, security check, PubMed screening, saving) is unchanged.
+import { track } from '../lib/analytics.js';
 import { useState, useEffect, useRef } from 'react';
 import { SUPABASE_READY, SUBMISSIONS_KEY, sbInsert } from '../lib/supabase.js';
 import { proxyPubMed, EDGE_VERIFY_TURNSTILE_URL, TURNSTILE_SITE_KEY } from '../lib/edge.js';
@@ -169,6 +173,7 @@ export default function SubmitForm() {
       // Preview: the photo (if any) waits in this browser for review.
       if (sendsPhoto && !photoSent && !SUPABASE_READY) submitHerbPhoto(form.name, photo);
       setDone(true);
+      track("herb_submitted", { with_photo: !!sendsPhoto });
     } catch (_) {
       setScreening("error");
     }

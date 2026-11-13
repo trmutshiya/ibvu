@@ -1,3 +1,10 @@
+// IBVU v6.08 — what changed in this file: Tatenda's cookie bar wording (Accept All /
+// Reject All, "Cookie Policy" link, editable).
+//
+// IBVU v6.07 — what changed in this file: Privacy has a new section "Analytics and
+// cookies" (and small changes to "What we collect", "Services we use" and "On your
+// device"); the cookie bar's wording is editable under Newsletter and footer.
+//
 // IBVU v6.02 — what changed in this file since v5.92: newsletter wording for the Confirm
 // email; Shop: the "subscribe to our newsletter" lines on Events and the Coming soon pages
 // (editable); Privacy: the mailing lists and the confirm step are described.
@@ -98,11 +105,12 @@ export const DEFAULT_PAGES = {
     updated: "Last updated: November 2026",
     sections: [
       { title: "Who we are", text: "This website (ibvu.org) is run by IBVU. If you have any question about your information, email hello@ibvu.org." },
-      { title: "What we collect, and why", text: "When you submit a herb: the herb's name, other names, traditional uses and country, and your email address. We use your email address to tell you what happened to your submission. If you tick the consent box, we may also contact you about your submission and about updates to the Herbarium Scientifica. If you add a photo, we keep it and, if it is approved, publish it on that herb's page.\n\nWhen you send the contact form: your name, email address, organisation (if you give one), the type of enquiry and your message. We use these to reply to you.\n\nWhen you subscribe to the newsletter: your name (if you give it), your email address and the mailing lists you choose. We first send you an email to confirm, and only add you once you press Confirm. We only send you what you chose, and every email has a link to unsubscribe from one list or all of them. If you tick the box on the contact form, we add you to the matching list in the same way.\n\nYou do not need an account to use this site. We do not use advertising or tracking cookies." },
+      { title: "What we collect, and why", text: "When you submit a herb: the herb's name, other names, traditional uses and country, and your email address. We use your email address to tell you what happened to your submission. If you tick the consent box, we may also contact you about your submission and about updates to the Herbarium Scientifica. If you add a photo, we keep it and, if it is approved, publish it on that herb's page.\n\nWhen you send the contact form: your name, email address, organisation (if you give one), the type of enquiry and your message. We use these to reply to you.\n\nWhen you subscribe to the newsletter: your name (if you give it), your email address and the mailing lists you choose. We first send you an email to confirm, and only add you once you press Confirm. We only send you what you chose, and every email has a link to unsubscribe from one list or all of them. If you tick the box on the contact form, we add you to the matching list in the same way.\n\nYou do not need an account to use this site. We do not use advertising cookies. We use Google Analytics only if you agree (see “Analytics and cookies” below)." },
       { title: "What is published", text: "Herb names, traditional uses, countries and approved photos are published in the Herbarium Scientifica. Your name and email address are never published." },
-      { title: "Services we use", text: "The website is hosted by Vercel. Submissions, messages and newsletter sign-ups are stored with Supabase. Emails are sent through Resend. The submission form uses Cloudflare Turnstile to stop automated spam. We use Sentry to find out about errors on the site. Fonts are loaded from Google Fonts. To check the scientific literature, herb names (not your details) are sent to PubMed and GBIF. These companies handle information on our behalf or in order to show you the page, and may do so in other countries." },
+      { title: "Services we use", text: "The website is hosted by Vercel. Submissions, messages and newsletter sign-ups are stored with Supabase. Emails are sent through Resend. The submission form uses Cloudflare Turnstile to stop automated spam. We use Sentry to find out about errors on the site. Fonts are loaded from Google Fonts. If you accept analytics cookies, Google Analytics (Google) measures how the site is used. To check the scientific literature, herb names (not your details) are sent to PubMed and GBIF. These companies handle information on our behalf or in order to show you the page, and may do so in other countries." },
       { title: "How long we keep it", text: "Herb submissions: for as long as the Herbarium Scientifica is running, so that there is a record of where knowledge came from. Contact messages: for up to two years. Newsletter details: until you unsubscribe. You can ask us to delete your details sooner." },
-      { title: "On your device", text: "The site remembers, for the length of your visit, that you have already seen the opening animation. It does not set cookies of its own. The spam check provided by Cloudflare may use its own." },
+      { title: "Analytics and cookies", text: "The first time you visit, a bar at the bottom of the page asks whether we may use analytics cookies. If you press Accept, we use Google Analytics to understand how the site is used: which pages are visited, roughly where visitors are (country and city), the kind of device and browser, how people found the site, and a few actions such as signing up to the newsletter, sending the contact form, submitting a herb or clicking to book an event. Google Analytics sets cookies (named _ga) so that it can recognise a returning browser. It never receives your name, your email address or anything you type into the forms, and advertising features are switched off.\n\nIf you press Reject, or do not choose, Google Analytics is not loaded at all and no analytics cookies are set. You can change your choice at any time with “Cookie settings” at the foot of every page; if you change to Reject, the analytics cookies are removed.\n\nGoogle keeps the detailed analytics data for 2 months; summary reports are kept longer. Google may process this data in other countries." },
+      { title: "On your device", text: "The site remembers in your browser that you have already seen the opening animation, and your cookie choice. Apart from analytics cookies (only if you accept), it does not set cookies of its own. The spam check provided by Cloudflare may use its own." },
       { title: "Your choices", text: "You can ask for a copy of the information we hold about you, ask us to correct or delete it, or withdraw a consent you gave, by emailing hello@ibvu.org. You also have the right to complain to the data protection regulator where you live (in the UK, the Information Commissioner's Office)." },
       { title: "Changes to this page", text: "If we change how we use information, we will update this page and the date at the top." },
     ],
@@ -117,6 +125,10 @@ export const DEFAULT_PAGES = {
     newsletterThanks: "Nearly there: please check your inbox.",
     footerLogo: "",
     footerLine: "IBVU · Regulate · Educate · Innovate",
+    cookieText: "IBVU uses cookies to ensure our website works properly and, with your permission, to analyse website traffic through Google Analytics. This helps us understand how visitors use our website and improve your experience.\n\nYou can accept or reject non-essential cookies.",
+    cookieAccept: "Accept All",
+    cookieReject: "Reject All",
+    cookieLink: "Cookie Policy",
   },
 
   regulate: {
@@ -425,6 +437,12 @@ export const PAGE_FORMS = {
       { title: "Footer", fields: [
         { key: "footerLogo", label: "Logo (leave as it is to keep the IBVU logo)", type: "image" },
         { key: "footerLine", label: "Line at the very bottom", type: "text" },
+      ] },
+      { title: "Cookie bar (asks before Google Analytics is used)", fields: [
+        { key: "cookieText", label: "Text. Leave an empty line between paragraphs.", type: "long" },
+        { key: "cookieAccept", label: "Accept button", type: "text" },
+        { key: "cookieReject", label: "Reject button", type: "text" },
+        { key: "cookieLink", label: "Link to the Privacy page's cookie section", type: "text" },
       ] },
     ],
   },

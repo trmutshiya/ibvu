@@ -1,3 +1,6 @@
+// IBVU v6.06 — what changed in this file: herb photos are framed as a square, the
+// shape they now have on the herb page and in the Herbarium list.
+//
 // IBVU v6.04 — what changed in this file since v6.03:
 // - Every picture can be framed: after choosing a picture the framing window
 //   opens (move, zoom bigger or smaller, fill or show the whole picture, turn,

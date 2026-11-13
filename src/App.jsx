@@ -1,3 +1,5 @@
+// IBVU v6.07 — what changed in this file: Google Analytics page views (with consent) and the cookie bar.
+//
 // IBVU v6.03 — what changed in this file: new pages ibvu.org/newsletter (past issues) and
 // ibvu.org/newsletter/issue-name. ibvu.org/newsletter/confirm keeps its own page.
 //
@@ -50,6 +52,8 @@ import { NewsletterConfirm, Unsubscribe } from './components/Subscriptions.jsx';
 import { NewsletterIndex, NewsletterIssue } from './components/Newsletters.jsx';
 import NotFound from './components/NotFound.jsx';
 import EditPageButton from './components/EditPageButton.jsx';
+import CookieBar from './components/CookieBar.jsx';
+import { trackPage } from './lib/analytics.js';
 import { ENTER_AT } from './constants/animation.js';
 import { SiteContext, useSite, usePageTitle, scrollToId } from './lib/site.js';
 
@@ -134,6 +138,14 @@ function Site() {
 
   useEffect(() => () => clearTimeout(leaveTimer.current), []);
 
+  // Google Analytics: each page change is a page view (only with consent, only
+  // on ibvu.org, never in admin; see src/lib/analytics.js). Sent after the page
+  // has set its title.
+  useEffect(() => {
+    const t = setTimeout(() => trackPage(pathname, document.title), 300);
+    return () => clearTimeout(t);
+  }, [pathname]);
+
   // ibvu.org/about lands on the home page with the About pop-up open.
   useEffect(() => {
     if (!(state && state.about)) return;
@@ -188,6 +200,7 @@ function Site() {
       </Routes>
       {panel && <InfoPanel type={panel} onClose={() => setPanel(null)} />}
       <EditPageButton />
+      <CookieBar />
       <div className={"overlay" + (leaving ? " on" : "")} />
     </SiteContext.Provider>
   );

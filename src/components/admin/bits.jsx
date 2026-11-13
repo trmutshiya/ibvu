@@ -1,3 +1,6 @@
+// IBVU v6.06 — what changed in this file: herb photos are framed as a square (the herb
+// page and the Herbarium list show them as small square tiles).
+//
 // IBVU v6.04 — what changed in this file: the image picker frames pictures.
 // After a picture is chosen the framing window opens (move, zoom in, turn,
 // reset; FrameEditor.jsx). "Frame picture" opens it again at any time, also
@@ -32,7 +35,7 @@ export const SHAPES = {
   tile: { label: "Tile", ratio: 3 / 2 },
   event: { label: "Event picture (upcoming and past)", ratio: 3 / 2 },
   wide: { label: "Picture", ratio: 3 / 2 },
-  herb: { label: "Herb page", ratio: 3 / 2 },
+  herb: { label: "Herb photo (herb page and Herbarium list)", ratio: 1 },
 };
 
 export function ImageField({ value, onChange, onError, label = "Image", folder = "pages", shapes = [SHAPES.tile], fallback = "", hint = "Best at least 1200 pixels wide." }) {

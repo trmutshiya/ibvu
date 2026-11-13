@@ -1,3 +1,5 @@
+// IBVU v6.07 — what changed in this file: "Book a place" clicks are counted in Google Analytics (only with consent).
+//
 // IBVU v6.04 — what changed in this file: the Shop tiles, the Herb Mail Club and Events pictures and event
 // pictures are shown as framed in admin (moved, zoomed in). The Events page now
 // has Upcoming events (soonest first, picture about 240 × 160) and Past events
@@ -23,6 +25,7 @@
 //   the "Dates coming soon" line as before.
 // - A "Coming soon" tile that is switched off in admin, and given a link,
 //   becomes a normal clickable tile.
+import { track } from '../lib/analytics.js';
 import { Link, useParams } from 'react-router-dom';
 import SiteHeader from './SiteHeader.jsx';
 import SiteFooter from './SiteFooter.jsx';
@@ -128,7 +131,7 @@ function EventTile({ event }) {
         {event.location && <p className="event-tile-place">{event.location}</p>}
         {event.description && <p className="event-tile-body">{event.description}</p>}
         <div className="event-tile-actions">
-          {event.bookingUrl && <a className="buy-btn small" href={event.bookingUrl} target="_blank" rel="noreferrer">Book a place</a>}
+          {event.bookingUrl && <a className="buy-btn small" href={event.bookingUrl} target="_blank" rel="noreferrer" onClick={() => track("event_booking_click", { event_title: event.title })}>Book a place</a>}
           <AddToCalendar event={event} path={path} />
         </div>
         <ShareButtons path={path} text={event.title + ", " + formatDate(event.date)} />
