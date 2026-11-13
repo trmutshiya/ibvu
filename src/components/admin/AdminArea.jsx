@@ -1,3 +1,12 @@
+// IBVU v6.11 — what changed in this file: Articles and Blog have the review step (as in the
+// approved mock-up). A Writer sends an article or post for review and can take it back
+// while it waits (it cannot be changed while waiting). An Editor or Owner comments (on
+// selected words, or on the whole text), publishes it or sends it back with a note.
+// Comments sit beside the text; the list shows "Waiting for your review" (Editors and
+// Owners) or "Sent back for changes" (Writers) at the top. Publishing takes the comment
+// highlights out of the text. Emails: see supabase/functions/article-review.
+// Also: the article title box now always grows to show the whole title.
+//
 // IBVU v6.09 — what changed in this file:
 // - Events: the start time is UK time; the form shows whether it will appear as GMT or
 //   BST, and the list shows it too. New "Preview" button shows the event tile exactly
@@ -101,6 +110,7 @@ import {
   herbKey, approveHerbPhoto, rejectHerbPhoto, setHerbPhoto, removeHerbPhoto,
   saveEvent, setEventStatus, deleteEvent,
   saveArticle, setArticleStatus, deleteArticle,
+  useReview, useReviewComments, reviewAction, stripReviewMarks,
   savePage, resetPage, savePerson, removePerson,
   formatDate, eventTime, ukZone, todayISO, excerpt, pageUrl, WRITING, sectionOf, articlePath,
 } from '../../lib/content.js';
@@ -119,6 +129,7 @@ const RichEditor = lazy(() => import('./RichEditor.jsx'));
 const AdminPanel = lazy(() => import('../AdminPanel.jsx'));
 const NewslettersAdmin = lazy(() => import('./NewslettersAdmin.jsx'));
 import { DeleteButton, ImageField, SHAPES } from './bits.jsx';
+import { ReviewBadge, ReviewBar, ReviewSide, emailedLine } from './Review.jsx';
 import FrameEditor, { FramePreview } from './FrameEditor.jsx';
 import { BUILTIN_IMAGES, IMAGE_SHAPES } from '../../content/builtinImages.js';
 import { parseImage, buildImage } from '../../lib/frame.js';
@@ -331,6 +342,21 @@ function ArticleEditor({ initial, role, onBack, onError, onPublished }) {
   const latest = useRef(a); latest.current = a;
   const isLive = a.status === "published";
   const mayPublish = can(role, "publish");
+  // v6.11: the review
+  const review = useReview(a.id);
+  const comments = useReviewComments(a.id);
+  const reviewOn = store.reviewReady !== false;
+  const reviewState = review ? review.state : "draft";
+  const locked = reviewOn && !mayPublish && reviewState === "review";   // a Writer's article waiting for review
+  const [notice, setNotice] = useState("");
+  const editorRef = useRef(null);
+  // The title box grows to fit the whole title (also beside the comments, where it is narrower).
+  useEffect(() => {
+    const fit = () => { const el = document.getElementById("ar-title"); if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [a.title, preview, a.id]);
   // Draft changes that arrive after the editor opened are filled in.
   const waitingAt = waiting && waiting.updatedAt;
   const [bodyKey, setBodyKey] = useState(0);
@@ -356,16 +382,67 @@ function ArticleEditor({ initial, role, onBack, onError, onPublished }) {
   // Drafts save by themselves shortly after you stop typing. A published
   // article only changes on the site when "Save changes" is pressed.
   useEffect(() => {
-    if (saveState !== "unsaved" || isLive) return;
+    if (saveState !== "unsaved" || isLive || locked) return;
     const timer = setTimeout(() => { setSaveState("saving"); persist(true); }, 1200);
     return () => clearTimeout(timer);
-  }, [a, saveState, isLive]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [a, saveState, isLive, locked]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // v6.11: comment highlights never go live.
+  function withoutMarks() {
+    const clean = stripReviewMarks(latest.current.body);
+    if (clean === latest.current.body) return;
+    latest.current = { ...latest.current, body: clean };
+    setA(v => ({ ...v, body: clean }));
+    setBodyKey(k => k + 1);
+  }
+  // After publishing: close the review and its comments, and tell the writer.
+  function closeReview(id) {
+    if (!reviewOn || (reviewState === "draft" && !comments.some(c => !c.resolved))) return;
+    reviewAction("published", id).then(r => { if (!r.ok) setProblem(r.error); else if (r.emailed || reviewState !== "draft") setNotice(emailedLine(r.emailed, "the writer")); });
+  }
+  // Saves the article (or its draft changes) so it can be sent for review; its id or null.
+  async function readyForReview() {
+    if (!latest.current.title.trim()) { setProblem(words.needTitle.replace("before publishing", "first")); return null; }
+    if (isLive) { if (saveState === "unsaved") saveAsDraft(); return latest.current.id; }
+    const result = persist(true);
+    return result ? result.id : null;
+  }
+  function removeMark(markId) {
+    const ed = editorRef.current;
+    if (ed && !ed.isDestroyed && ed.isEditable) {
+      const type = ed.state.schema.marks.reviewComment;
+      let tr = ed.state.tr, changed = false;
+      ed.state.doc.descendants((node, pos) => {
+        node.marks.forEach(m => { if (m.type === type && m.attrs.id === markId) { tr = tr.removeMark(pos, pos + node.nodeSize, m); changed = true; } });
+      });
+      if (changed) ed.view.dispatch(tr);
+      return;
+    }
+    const body = latest.current.body.replace(new RegExp('<mark\\b[^>]*data-c="' + markId + '"[^>]*>([\\s\\S]*?)</mark>', "g"), "$1");
+    if (body !== latest.current.body && !locked) { change({ body }); setBodyKey(k => k + 1); }
+  }
+  function showMark(markId) {
+    const el = markId && document.querySelector('.rte-content mark[data-c="' + markId + '"]');
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.add("rv-flash");
+    setTimeout(() => el.classList.remove("rv-flash"), 1600);
+  }
+  async function commentOnWords({ markId, quote, text }) {
+    setProblem("");
+    const r = await reviewAction("comment", latest.current.id, { markId, quote, body: text });
+    if (!r.ok) { setProblem(r.error); return false; }
+    if (r.emailed) setNotice(emailedLine(r.emailed, "the writer"));
+    return true;
+  }
 
   function publish() {
     if (!a.title.trim()) { setProblem(words.needTitle); return; }
     setProblem("");
+    withoutMarks();
     const result = persist(false); if (!result) return;
     setArticleStatus(result.id, "published");
+    closeReview(result.id);
     setA(v => ({ ...v, id: result.id, slug: result.slug, status: "published", publishedAt: v.publishedAt || new Date().toISOString() }));
     onPublished({ title: a.title.trim(), text: excerpt({ ...a, summary: a.summary }), path: WRITING[section].path + "/" + result.slug });
   }
@@ -380,9 +457,11 @@ function ArticleEditor({ initial, role, onBack, onError, onPublished }) {
   function publishChanges() {
     if (!a.title.trim()) { setProblem(words.needTitle); return; }
     setProblem("");
+    withoutMarks();
     const result = persist(false); if (!result) return;
     if (waiting) discardDraftChanges("article", a.id, a.title, { quiet: true });
     setSaveState("saved");
+    closeReview(result.id);
   }
   function discard() {
     discardDraftChanges("article", a.id, a.title);
@@ -399,28 +478,36 @@ function ArticleEditor({ initial, role, onBack, onError, onPublished }) {
     <div className="cadmin-editor">
       <div className="cadmin-editor-bar">
         <button type="button" className="cadmin-btn" onClick={() => { if (saveState === "unsaved") { if (isLive) saveAsDraft(); else persist(true); } onBack(); }}>{words.all}</button>
-        <StatusBadge status={a.status} />{waiting && <WaitingBadge />}
-        <span className="cadmin-save-state" aria-live="polite">{saveLabel}</span>
+        <StatusBadge status={a.status} />{waiting && <WaitingBadge />}{reviewOn && <ReviewBadge review={review} />}
+        <span className="cadmin-save-state" aria-live="polite">{locked ? "Waiting for review" : saveLabel}</span>
         <span className="cadmin-spacer" />
         <button type="button" className="cadmin-btn" onClick={() => setPreview(p => !p)}>{preview ? "Back to editing" : "Preview"}</button>
-        {isLive && <button type="button" className="cadmin-btn solid" disabled={saveState !== "unsaved"} onClick={saveAsDraft}>Save as draft changes</button>}
+        {isLive && !locked && <button type="button" className="cadmin-btn solid" disabled={saveState !== "unsaved"} onClick={saveAsDraft}>Save as draft changes</button>}
         {isLive && mayPublish && <button type="button" className="cadmin-btn go" disabled={saveState !== "unsaved" && !waiting} onClick={publishChanges}>Publish changes</button>}
-        {isLive && waiting && <DeleteButton label="Discard draft changes" question="Throw away the draft changes?" confirmLabel="Yes, discard" onDelete={discard} />}
+        {isLive && waiting && !locked && <DeleteButton label="Discard draft changes" question="Throw away the draft changes?" confirmLabel="Yes, discard" onDelete={discard} />}
         {mayPublish && (isLive
           ? <button type="button" className="cadmin-btn" onClick={unpublish}>Unpublish</button>
           : <button type="button" className="cadmin-btn go" onClick={publish}>Publish</button>)}
         {a.id && can(role, "delete") && <DeleteButton onDelete={() => { deleteArticle(a.id); onBack(); }} />}
       </div>
       {problem && <p className="cadmin-problem" role="alert">{problem}</p>}
+      {notice && <p className="cadmin-note" role="status">{notice}</p>}
+      {reviewOn && (
+        <ReviewBar review={review} mayPublish={mayPublish} title={!!a.title.trim()} ready={readyForReview}
+          onProblem={setProblem} onDone={line => setNotice(line)} />
+      )}
       {isLive && a.slug && <p className="cadmin-hint">Live at <Link to={articlePath(a)}>{pageUrl(articlePath(a))}</Link></p>}
       {isLive && <DraftNote draft={waiting} />}
-      {!mayPublish && <p className="cadmin-hint">{isLive ? "This is live. Writers can suggest changes with “Save as draft changes”; an Editor or Owner publishes them." : "Writers can save drafts. An Editor or Owner publishes them."}</p>}
+      {!mayPublish && !locked && <p className="cadmin-hint">{isLive ? "This is live. Writers can suggest changes with “Save as draft changes”, then send them for review; an Editor or Owner publishes them." : reviewOn ? "Writers save drafts and send them for review. An Editor or Owner publishes them." : "Writers can save drafts. An Editor or Owner publishes them."}</p>}
       {isLive && mayPublish && !waiting && <p className="cadmin-hint">This is live. “Publish changes” updates the site; “Save as draft changes” keeps your changes aside until you are ready.</p>}
 
+      <div className={reviewOn && a.id ? "rv-layout" : ""}>
+      <div className="rv-main">
       {preview ? (
         <div className="cadmin-preview"><ArticleView article={a} share={false} /></div>
       ) : (
-        <div className="cadmin-writing">
+        <fieldset className="cadmin-writing rv-fieldset" disabled={locked}>
+          {locked && <legend className="visually-hidden">Waiting for review: cannot be changed</legend>}
           <label className="visually-hidden" htmlFor="ar-title">Title</label>
           <textarea id="ar-title" className="cadmin-title-input" rows="1" placeholder="Title" value={a.title}
             onChange={e => change({ title: e.target.value.replace(/\n/g, " ") })}
@@ -431,10 +518,18 @@ function ArticleEditor({ initial, role, onBack, onError, onPublished }) {
             <div className="cadmin-field"><label>Cover image</label><ImageField value={a.cover} label="Cover image" folder="articles" shapes={[SHAPES.tile]} withCaption hint="Framing sets the tile. The open article shows the whole picture. Best at least 1200 pixels wide." onChange={cover => change({ cover })} onError={onError} /></div>
           </div>
           <Suspense fallback={<p className="cadmin-hint">Loading the editor…</p>}>
-            <RichEditor key={bodyKey} value={a.body} onChange={body => change({ body })} onError={onError} />
+            <RichEditor key={bodyKey} value={a.body} onChange={body => { if (!locked) change({ body }); }} onError={onError}
+              editable={!locked} onReady={ed => { editorRef.current = ed; }}
+              onCommentSelection={reviewOn && mayPublish && !isLive && a.id ? commentOnWords : null} />
           </Suspense>
-        </div>
+        </fieldset>
       )}
+      </div>
+      {reviewOn && a.id && (
+        <ReviewSide articleId={a.id} review={review} comments={comments} mayResolve={!locked}
+          onResolved={removeMark} onShow={showMark} onProblem={setProblem} onDone={line => setNotice(line)} />
+      )}
+      </div>
     </div>
   );
 }
@@ -443,11 +538,17 @@ function ArticleEditor({ initial, role, onBack, onError, onPublished }) {
 function ArticlesAdmin({ role, onError, section = "media" }) {
   const words = WORDS[section];
   const place = WRITING[section];
-  const { drafts } = useContent();
+  const { drafts, reviews, reviewReady } = useContent();
   const articles = useContent().articles.filter(a => sectionOf(a) === section);
   const [editing, setEditing] = useState(null);
   const [shared, setShared] = useState(null);
   const sorted = [...articles].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+  // v6.11: what needs this person's attention goes first.
+  const reviewOn = reviewReady !== false;
+  const mayPublish = can(role, "publish");
+  const stateOf = ar => (reviewOn && reviews && reviews[ar.id] ? reviews[ar.id].state : "draft");
+  const first = reviewOn ? sorted.filter(ar => stateOf(ar) === (mayPublish ? "review" : "changes")) : [];
+  const rest = sorted.filter(ar => !first.includes(ar));
 
   if (editing) {
     return (
@@ -457,31 +558,45 @@ function ArticlesAdmin({ role, onError, section = "media" }) {
       </section>
     );
   }
+  const row = ar => {
+    const rv = reviews && reviews[ar.id];
+    const st = stateOf(ar);
+    const meta = st === "review" ? "Sent for review" + (rv.sentAt ? " " + formatDate(rv.sentAt.slice(0, 10), false) : "")
+      : st === "changes" ? "Sent back for changes" + (rv.backBy ? " by the " + rv.backBy : "")
+      : ar.status === "published" ? "Published " + formatDate(ar.publishedAt, false) : "Draft";
+    const attention = first.includes(ar);
+    return (
+      <div className={"cadmin-item" + (attention ? " rv-attn" : "")} key={ar.id}>
+        <div className="cadmin-item-main">
+          <p className="cadmin-item-title">{ar.title || "(untitled)"} <StatusBadge status={ar.status} />{drafts["article:" + ar.id] && <WaitingBadge />}{reviewOn && <ReviewBadge review={rv} />}</p>
+          <p className="cadmin-item-meta">{meta}{ar.author ? " · " + ar.author : ""}</p>
+        </div>
+        <div className="cadmin-item-actions">
+          <button type="button" className={"cadmin-btn" + (attention ? " solid" : "")} onClick={() => setEditing(ar)}>{attention ? (mayPublish ? "Review" : "Open and change") : ar.status === "published" && !mayPublish ? "Suggest changes" : st === "review" && !mayPublish ? "Open" : "Edit"}</button>
+          {ar.status === "published" && <Link className="cadmin-btn" to={articlePath(ar)}>View</Link>}
+          {mayPublish && ar.status === "published" && <button type="button" className="cadmin-btn" onClick={() => setArticleStatus(ar.id, "draft")}>Unpublish</button>}
+          {can(role, "delete") && <DeleteButton onDelete={() => deleteArticle(ar.id)} />}
+        </div>
+      </div>
+    );
+  };
   return (
     <section>
       <div className="cadmin-section-head">
         <h2>{words.heading}</h2>
         <button type="button" className="cadmin-btn solid" onClick={() => setEditing({ ...NEW_ARTICLE, section })}>{words.add}</button>
       </div>
-      <p className="cadmin-hint">Published {place.many} appear as tiles on the <Link to={place.path}>{place.name} page</Link>, newest first. Drafts are only visible here.</p>
+      <p className="cadmin-hint">Published {place.many} appear as tiles on the <Link to={place.path}>{place.name} page</Link>, newest first. Drafts are only visible here.{reviewOn ? (mayPublish ? " Writers send their drafts for review; they wait at the top for you." : " When a draft is ready, open it and press “Send for review…”.") : ""}</p>
+      {first.length > 0 && (
+        <>
+          <h3 className="cadmin-h3">{mayPublish ? "Waiting for your review" : "Sent back for changes"} <span className="cadmin-count">{first.length}</span></h3>
+          <div className="cadmin-list rv-first">{first.map(row)}</div>
+          <h3 className="cadmin-h3">All {place.many}</h3>
+        </>
+      )}
       <div className="cadmin-list">
         {sorted.length === 0 && <p className="cadmin-empty">{words.none}</p>}
-        {sorted.map(ar => {
-          return (
-            <div className="cadmin-item" key={ar.id}>
-              <div className="cadmin-item-main">
-                <p className="cadmin-item-title">{ar.title || "(untitled)"} <StatusBadge status={ar.status} />{drafts["article:" + ar.id] && <WaitingBadge />}</p>
-                <p className="cadmin-item-meta">{ar.status === "published" ? "Published " + formatDate(ar.publishedAt, false) : "Draft"}{ar.author ? " · " + ar.author : ""}</p>
-              </div>
-              <div className="cadmin-item-actions">
-                <button type="button" className="cadmin-btn" onClick={() => setEditing(ar)}>{ar.status === "published" && !can(role, "publish") ? "Suggest changes" : "Edit"}</button>
-                {ar.status === "published" && <Link className="cadmin-btn" to={articlePath(ar)}>View</Link>}
-                {can(role, "publish") && ar.status === "published" && <button type="button" className="cadmin-btn" onClick={() => setArticleStatus(ar.id, "draft")}>Unpublish</button>}
-                {can(role, "delete") && <DeleteButton onDelete={() => deleteArticle(ar.id)} />}
-              </div>
-            </div>
-          );
-        })}
+        {rest.map(row)}
       </div>
     </section>
   );
@@ -1044,6 +1159,13 @@ const SECTIONS = [
 ];
 
 function AdminHome({ sections, session, waiting }) {
+  // v6.11: articles and blog posts waiting for this person (to review, or sent back)
+  const { articles, reviews, reviewReady } = useContent();
+  const wanted = can(session.role, "publish") ? "review" : "changes";
+  const toReview = { articles: 0, blog: 0 };
+  if (reviewReady !== false) for (const ar of articles) {
+    if (reviews[ar.id] && reviews[ar.id].state === wanted) toReview[sectionOf(ar) === "blog" ? "blog" : "articles"]++;
+  }
   return (
     <>
       <h1 className="cadmin-h1">Admin</h1>
@@ -1051,7 +1173,7 @@ function AdminHome({ sections, session, waiting }) {
       <div className="cadmin-home">
         {sections.map(s => (
           <Link className="cadmin-home-card" to={"/admin/" + s.id} key={s.id}>
-            <h2>{s.label} {s.id === "herbphotos" && waiting > 0 && <span className="cadmin-count">{waiting} waiting</span>}</h2>
+            <h2>{s.label} {s.id === "herbphotos" && waiting > 0 && <span className="cadmin-count">{waiting} waiting</span>}{(s.id === "articles" || s.id === "blog") && toReview[s.id] > 0 && <span className="cadmin-count">{toReview[s.id]} {can(session.role, "publish") ? "to review" : "sent back"}</span>}</h2>
             <p>{s.about}</p>
             <span className="cadmin-home-address">ibvu.org/admin/{s.id}</span>
           </Link>

@@ -1,3 +1,12 @@
+// IBVU v6.11 — what changed in this file:
+// - Comment highlights: words an Editor or Owner comments on are kept in the text as
+//   <mark data-c="…"> (the ReviewComment mark), so the comment stays tied to them. The
+//   public site never shows them (see stripReviewMarks).
+// - onCommentSelection: a "Comment" button in the toolbar. Select words, press it, write
+//   the comment: the words are highlighted and onCommentSelection({ markId, quote, text })
+//   saves the comment (if that fails the highlight is taken off again).
+// - editable={false}: read only (a Writer's article while it waits for review).
+//
 // IBVU v6.10 — what changed in this file: tileMode (used by Newsletters):
 // - a new picture starts at tile size: it fits inside a 340 × 227 px tile in its own
 //   shape (after cropping a new picture, tile size of its new shape);
@@ -45,7 +54,7 @@
 // The writing area for articles: headings, bold, italic, quotes, lists, links
 // and images, with undo and redo. Built on the TipTap editor.
 import { useRef, useState, useEffect } from 'react';
-import { useEditor, EditorContent, ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
+import { useEditor, EditorContent, ReactNodeViewRenderer, NodeViewWrapper, Mark, mergeAttributes } from '@tiptap/react';
 import { NodeSelection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
@@ -150,6 +159,28 @@ const CROP_SHAPES = [
   { label: "Portrait", ratio: 4 / 5 },
 ];
 
+// v6.11: words a comment is about. Several comments may cover the same words.
+const ReviewComment = Mark.create({
+  name: "reviewComment",
+  inclusive: false,
+  excludes: "",
+  addAttributes() {
+    return { id: { default: null, parseHTML: el => el.getAttribute("data-c"), renderHTML: a => (a.id ? { "data-c": a.id } : {}) } };
+  },
+  parseHTML() { return [{ tag: "mark[data-c]" }]; },
+  renderHTML({ HTMLAttributes }) { return ["mark", mergeAttributes({ class: "rv-mark" }, HTMLAttributes), 0]; },
+});
+// Takes the highlight for one comment off the text.
+export function removeCommentMark(editor, id) {
+  if (!editor || !id) return;
+  const type = editor.state.schema.marks.reviewComment;
+  let tr = editor.state.tr, changed = false;
+  editor.state.doc.descendants((node, pos) => {
+    node.marks.forEach(m => { if (m.type === type && m.attrs.id === id) { tr = tr.removeMark(pos, pos + node.nodeSize, m); changed = true; } });
+  });
+  if (changed) editor.view.dispatch(tr);
+}
+
 // The picture with its size, position and (after cropping) its original.
 const FramedImage = Image.extend({
   addOptions() { return { ...this.parent?.(), tileMode: false }; },
@@ -210,7 +241,12 @@ const FramedImage = Image.extend({
   },
 });
 
-export default function RichEditor({ value, onChange, onError, onReady, placeholder = "Write your article…", tileMode = false }) {
+export default function RichEditor({ value, onChange, onError, onReady, placeholder = "Write your article…", tileMode = false, editable = true, onCommentSelection = null }) {
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [commentText, setCommentText] = useState("");
+  const [commentQuote, setCommentQuote] = useState("");
+  const [commentBusy, setCommentBusy] = useState(false);
+  const [commentHint, setCommentHint] = useState("");
   const fileRef = useRef(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
@@ -226,12 +262,15 @@ export default function RichEditor({ value, onChange, onError, onReady, placehol
       Link.configure({ openOnClick: false, autolink: true }),
       FramedImage.configure({ allowBase64: true, tileMode }),
       Placeholder.configure({ placeholder }),
+      ReviewComment,
     ],
+    editable,
     content: value || "",
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
   });
 
   useEffect(() => { if (editor && onReady) onReady(editor); }, [editor]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (editor && editor.isEditable !== editable) editor.setEditable(editable); }, [editor, editable]);
 
   if (!editor) return null;
 
@@ -306,9 +345,35 @@ export default function RichEditor({ value, onChange, onError, onReady, placehol
     setSaving(false);
   }
 
+  // v6.11: comment on the selected words
+  function openComment() {
+    const { from, to, empty } = editor.state.selection;
+    if (empty) { setCommentHint("Select the words you want to comment on first."); return; }
+    setCommentHint("");
+    setCommentQuote(editor.state.doc.textBetween(from, to, " ").slice(0, 300));
+    setCommentText("");
+    setCommentOpen(true);
+  }
+  async function addComment(e) {
+    e.preventDefault();
+    const words = commentText.trim();
+    if (!words) return;
+    const markId = "c" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+    const wasEditable = editor.isEditable;
+    if (!wasEditable) editor.setEditable(true);
+    editor.chain().setMark("reviewComment", { id: markId }).run();
+    if (!wasEditable) editor.setEditable(false);
+    setCommentBusy(true);
+    const ok = await onCommentSelection({ markId, quote: commentQuote, text: words });
+    setCommentBusy(false);
+    if (!ok) { removeCommentMark(editor, markId); return; }
+    setCommentOpen(false);
+  }
+
   return (
-    <div className="rte">
+    <div className={"rte" + (editable ? "" : " rte-readonly")}>
       <div className="rte-toolbar" role="toolbar" aria-label="Formatting">
+        {editable && (<>
         <Btn label="Heading" active={editor.isActive("heading", { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} />
         <Btn label="Subheading" active={editor.isActive("heading", { level: 3 })} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} />
         <span className="rte-gap" />
@@ -325,8 +390,19 @@ export default function RichEditor({ value, onChange, onError, onReady, placehol
         <Btn label="Undo" onClick={() => editor.chain().focus().undo().run()} />
         <Btn label="Redo" onClick={() => editor.chain().focus().redo().run()} />
         <input ref={fileRef} type="file" accept="image/*" hidden onChange={addImage} />
+        </>)}
+        {onCommentSelection && <Btn label="Comment" title="Comment on the selected words" onClick={openComment} />}
       </div>
 
+      {commentHint && <p className="rte-caption-note" role="status">{commentHint}</p>}
+      {commentOpen && (
+        <form className="rte-link rte-comment" onSubmit={addComment}>
+          <label htmlFor="rte-comment">Comment on “{commentQuote.length > 80 ? commentQuote.slice(0, 80) + "…" : commentQuote}”</label>
+          <textarea id="rte-comment" rows="2" value={commentText} maxLength={2000} onChange={e => setCommentText(e.target.value)} autoFocus />
+          <button type="submit" className="cadmin-btn solid" disabled={commentBusy || !commentText.trim()}>{commentBusy ? "Adding…" : "Add comment"}</button>
+          <button type="button" className="cadmin-btn" onClick={() => setCommentOpen(false)}>Cancel</button>
+        </form>
+      )}
       {linkOpen && (
         <form className="rte-link" onSubmit={applyLink}>
           <label htmlFor="rte-link-url">Link address</label>
@@ -337,7 +413,7 @@ export default function RichEditor({ value, onChange, onError, onReady, placehol
         </form>
       )}
 
-      {onImage && (
+      {onImage && editable && (
         <div className="rte-imagebar" role="toolbar" aria-label="Picture">
           <span className="rte-imagebar-label">Picture:</span>
           {tileMode ? (

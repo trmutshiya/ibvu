@@ -1,3 +1,7 @@
+// IBVU v6.11 — what changed in this file: the review tables (article_reviews,
+// article_comments), their two read functions, a stand-in article-review function (same
+// rules and emails as the real one) and the rule that a Writer cannot change an article
+// while it is waiting for review.
 // IBVU v6.03 — what changed in this file: newsletter tables (issues, who received them,
 // reminder addresses and settings), draft changes, the list-count and show/hide functions,
 // and a stand-in send-newsletter function (test, send, tick). Emails it would send are kept
@@ -21,6 +25,7 @@ const db = {
   herb_photos: [], contact_messages: [], newsletter_signups: [],
   approved_herbs: [], static_herbs: [], submissions: [], herb_edits: [],
   newsletter_issues: [], newsletter_sends: [], admin_reminder_recipients: [], content_drafts: [],
+  article_reviews: [], article_comments: [],
   newsletter_reminder_settings: [{ id: 1, due_enabled: true, due_day: 25, due_list: 'monthly', before_enabled: true, before_hours: 24, after_enabled: true }],
 };
 const emails = []; // what send-newsletter would have emailed
@@ -79,6 +84,7 @@ function visible(table, rows, who) {
     case 'newsletter_issues': return (who.role === 'owner' || who.role === 'editor') ? rows : rows.filter(r => r.status === 'sent' && r.show_on_site);
     case 'newsletter_sends': case 'admin_reminder_recipients': case 'newsletter_reminder_settings': return who.role === 'owner' ? rows : null;
     case 'content_drafts': return staff ? rows : null;
+    case 'article_reviews': case 'article_comments': return null;   // only through the functions
     default: return rows;
   }
 }
@@ -136,6 +142,14 @@ http.createServer(async (req, res) => {
     const counts = {};
     db.newsletter_signups.filter(s => !s.unsubscribed_at).forEach(s => s.lists.forEach(k => { counts[k] = (counts[k] || 0) + 1; }));
     return send(res, 200, counts);
+  }
+  if (p === '/rest/v1/rpc/article_reviews_list') {
+    if (!who.role) return send(res, 200, []);
+    return send(res, 200, db.article_reviews.map(r => ({ article_id: r.article_id, state: r.state, note: r.note, sent_at: r.sent_at, back_note: r.back_note, back_by: r.back_by, log: r.log, updated_at: r.updated_at, sent_by_me: r.writer_email === who.email })));
+  }
+  if (p === '/rest/v1/rpc/article_comments_list') {
+    if (!who.role) return send(res, 200, []);
+    return send(res, 200, db.article_comments.map(c => ({ id: c.id, article_id: c.article_id, parent_id: c.parent_id, author_role: c.author_role, quote: c.quote, mark_id: c.mark_id, body: c.body, resolved: c.resolved, created_at: c.created_at, mine: c.author_email === who.email })));
   }
   if (p === '/rest/v1/rpc/newsletter_set_visible') {
     if (who.role !== 'owner') return send(res, 403, { code: '42501', message: 'Only Owners can do this.' });
@@ -252,6 +266,66 @@ http.createServer(async (req, res) => {
     }
     return send(res, 400, { ok: false, error: 'Unknown request.' });
   }
+  if (p === '/functions/v1/article-review') {
+    if (!who.role) return send(res, 401, { ok: false, error: 'Please sign in again.' });
+    const ROLE = { owner: 'Owner', editor: 'Editor', writer: 'Writer' };
+    const reviewer = who.role === 'owner' || who.role === 'editor', label = ROLE[who.role];
+    const article = db.site_articles.find(a => a.id === (json && json.articleId));
+    if (!article) return send(res, 404, { ok: false, error: 'This article was not found. It may not have saved yet: wait a moment and try again.' });
+    const title = article.title || '(untitled)';
+    const found = db.article_reviews.find(r => r.article_id === article.id);
+    const review = found || { article_id: article.id, state: 'draft', writer_email: '', note: '', sent_at: null, back_note: '', back_by: '', log: [] };
+    const at = new Date().toISOString();
+    const logged = what => [...review.log, { at, who: label, what }];
+    const comments = db.article_comments.filter(c => c.article_id === article.id);
+    const open = comments.filter(c => !c.resolved && !c.parent_id);
+    const reviewers = () => db.site_people.filter(x => ['owner', 'editor'].includes(x.role) && x.email !== who.email).map(x => x.email);
+    const mail = (to, subject) => { to.forEach(e => emails.push({ to: e, subject: 'IBVU admin: ' + subject })); return to.length; };
+    const text = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+    let next = null, emailed = 0;
+    const a = json.action;
+    if (a === 'send') {
+      if (review.state === 'review') return send(res, 409, { ok: false, error: 'This is already waiting for review.' });
+      const note = text(json.note, 1000);
+      next = { ...review, state: 'review', writer_email: who.email, note, sent_at: at, log: logged('sent it for review') };
+      emailed = mail(reviewers(), 'Ready for review: ' + title);
+    } else if (a === 'takeback') {
+      if (review.state !== 'review') return send(res, 409, { ok: false, error: 'This is not waiting for review.' });
+      if (!reviewer && review.writer_email !== who.email) return send(res, 403, { ok: false, error: 'Only the person who sent it can take it back.' });
+      next = { ...review, state: open.length || review.back_note ? 'changes' : 'draft', log: logged('took it back from review') };
+      emailed = mail(reviewers(), 'Taken back: ' + title);
+    } else if (a === 'sendback') {
+      if (!reviewer) return send(res, 403, { ok: false, error: 'Only Editors and Owners can send it back.' });
+      if (review.state !== 'review') return send(res, 409, { ok: false, error: 'Only something sent for review can be sent back.' });
+      const note = text(json.note, 1000);
+      if (!note && !open.length) return send(res, 400, { ok: false, error: 'Add a note or a comment so the writer knows what to change.' });
+      next = { ...review, state: 'changes', back_note: note, back_by: label, log: logged('sent it back') };
+      if (review.writer_email !== who.email) emailed = mail([review.writer_email], 'Changes asked for: ' + title);
+    } else if (a === 'comment') {
+      const words = text(json.body, 2000);
+      if (!words) return send(res, 400, { ok: false, error: 'Write the comment first.' });
+      const parentId = json.parentId || null;
+      db.article_comments.push({ id: crypto.randomUUID(), article_id: article.id, parent_id: parentId, author_email: who.email, author_role: who.role, quote: parentId ? '' : text(json.quote, 300), mark_id: parentId ? '' : (json.markId || ''), body: words, resolved: false, created_at: at });
+      if (!parentId) next = { ...review, log: logged('added a comment') };
+      if (!parentId && reviewer && review.state === 'changes' && review.writer_email && review.writer_email !== who.email) emailed = mail([review.writer_email], 'New comment: ' + title);
+    } else if (a === 'resolve') {
+      const c = comments.find(x => x.id === json.commentId);
+      if (!c) return send(res, 404, { ok: false, error: 'That comment was not found.' });
+      c.resolved = true; next = { ...review, log: logged('marked a comment done') };
+    } else if (a === 'published') {
+      if (!reviewer) return send(res, 403, { ok: false, error: 'Only Editors and Owners publish.' });
+      comments.forEach(c => { c.resolved = true; });
+      if (review.writer_email && review.writer_email !== who.email && ['review', 'changes'].includes(review.state)) emailed = mail([review.writer_email], 'Published: ' + title);
+      next = { ...review, state: 'draft', note: '', back_note: '', back_by: '', log: logged('published it') };
+    } else return send(res, 400, { ok: false, error: 'Unknown request.' });
+    if (next) { next.updated_at = at; if (found) Object.assign(found, next); else db.article_reviews.push(next); }
+    const r = next || found || null;
+    return send(res, 200, {
+      ok: true, emailed,
+      review: r && { article_id: r.article_id, state: r.state, note: r.note, sent_at: r.sent_at, back_note: r.back_note, back_by: r.back_by, log: r.log, updated_at: r.updated_at, sent_by_me: r.writer_email === who.email },
+      comments: db.article_comments.filter(c => c.article_id === article.id).map(c => ({ id: c.id, article_id: c.article_id, parent_id: c.parent_id, author_role: c.author_role, quote: c.quote, mark_id: c.mark_id, body: c.body, resolved: c.resolved, created_at: c.created_at, mine: c.author_email === who.email })),
+    });
+  }
   if (p === '/functions/v1/admin-add-person') {
     if (who.role !== 'owner') return send(res, 403, { ok: false, error: 'Only an Owner can add people.' });
     const email = (json.email || '').toLowerCase();
@@ -326,6 +400,10 @@ http.createServer(async (req, res) => {
       const touched = req.method === 'POST' ? incoming.map(r => all.find(x => x.id === r.id)).filter(Boolean) : filterRows(seen, url.searchParams);
       if (touched.some(x => x.status === 'sent' || x.status === 'sending')) return denied();
       if (who.role === 'editor' && (touched.some(x => x.status !== 'draft') || incoming.some(r => r && r.status && r.status !== 'draft'))) return denied();
+    }
+    if (table === 'site_articles' && who.role === 'writer') {
+      const ids = req.method === 'POST' ? (Array.isArray(json) ? json : [json]).map(r => r && r.id) : filterRows(seen, url.searchParams).map(r => r.id);
+      if (ids.some(id => db.article_reviews.some(r => r.article_id === id && r.state === 'review'))) return denied();
     }
     if (table === 'content_drafts' && who.role === 'writer' && (Array.isArray(json) ? json : [json]).some(r => r && r.kind === 'page')) return denied();
     if (req.method === 'POST') {

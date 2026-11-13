@@ -1,3 +1,7 @@
+// IBVU v6.11 — what changed in this file: also checks the review step: a Writer sends an
+// article for review (it is saved first, the Owner is emailed, the database refuses the
+// Writer's changes while it waits), the Owner comments and sends it back (the Writer is
+// emailed and sees the comment, shown by role, with no email address).
 // IBVU v6.07 — what changed in this file: pages open with a cookie choice already made.
 // IBVU v6.06 — what changed in this file: the approved herb photo is checked as a tile
 // beside the name and on its card in the list.
@@ -419,6 +423,46 @@ export async function check() {
   await w.page.goto(B + '/admin/newsletters');
   await w.page.waitForSelector('text=Newsletters is not part of your access', { timeout: 10000 });
   ok('Writer has no Newsletters section', true);
+
+  // v6.11: review
+  await w.page.goto(B + '/admin/articles');
+  await w.page.click('button:has-text("New article")');
+  await w.page.fill('#ar-title', 'Review me please');
+  await w.page.click('.rte-content .ProseMirror');
+  await w.page.keyboard.type('Some words to check.');
+  await w.page.click('button:has-text("Send for review…")');
+  await w.page.fill('#rv-note', 'First draft');
+  await w.page.click('.rv-ask button:has-text("Send for review")');
+  await w.page.waitForSelector('.rv-banner.review', { timeout: 10000 });
+  for (let i = 0; i < 10; i++) { d = await dbNow(); if (d.article_reviews.length) break; await w.page.waitForTimeout(300); }
+  const reviewed = d.site_articles.find(a => a.title === 'Review me please');
+  ok('Writer sent an article for review (saved first, then the server)', !!reviewed && d.article_reviews.some(r => r.article_id === reviewed.id && r.state === 'review' && r.writer_email === 'writer@example.org' && r.note === 'First draft'), JSON.stringify(d.article_reviews));
+  let em = await (await fetch(M + '/__emails')).json();
+  ok('the Owner is emailed "Ready for review", the Writer is not', em.some(e => e.to === 'owner@example.org' && /Ready for review: Review me please/.test(e.subject)) && !em.some(e => e.to === 'writer@example.org' && /Ready for review/.test(e.subject)));
+  const writerToken = await w.page.evaluate(() => { const k = Object.keys(localStorage).find(x => /^sb-.*-auth-token$/.test(x)); return k ? JSON.parse(localStorage.getItem(k)).access_token : ''; });
+  const lockRes = await fetch(M + '/rest/v1/site_articles?id=eq.' + (reviewed && reviewed.id), { method: 'PATCH', headers: { apikey: 'anon-test-key', Authorization: 'Bearer ' + writerToken, 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'Changed while waiting' }) });
+  ok('the database refuses a Writer\'s change while it waits for review', lockRes.status === 403, String(lockRes.status));
+  await o.page.goto(B + '/admin/articles');
+  await o.page.waitForSelector('.rv-first .cadmin-item:has-text("Review me please")', { timeout: 10000 });
+  ok('Owner sees it under "Waiting for your review"', true);
+  await o.page.click('.rv-first .cadmin-item:has-text("Review me please") button:has-text("Review")');
+  await o.page.fill('#rv-new', 'Please add a source.');
+  await o.page.click('.rv-new button:has-text("Add comment")');
+  await o.page.waitForSelector('.rv-side .rv-c', { timeout: 10000 });
+  await o.page.click('button:has-text("Send back to the writer…")');
+  await o.page.fill('#rv-back', 'Nearly there');
+  await o.page.click('button:has-text("Send it back")');
+  await o.page.waitForSelector('.rv-banner.changes', { timeout: 10000 });
+  d = await dbNow();
+  em = await (await fetch(M + '/__emails')).json();
+  ok('sent back: the state, the comment and an email to the Writer', d.article_reviews.some(r => r.state === 'changes' && r.back_note === 'Nearly there') && d.article_comments.some(c => c.body === 'Please add a source.' && c.author_role === 'owner') && em.some(e => e.to === 'writer@example.org' && /Changes asked for: Review me please/.test(e.subject)));
+  await w.page.goto(B + '/admin/articles');
+  await w.page.waitForSelector('.rv-first .cadmin-item:has-text("Review me please")', { timeout: 10000 });
+  await w.page.click('.rv-first .cadmin-item:has-text("Review me please") button');
+  await w.page.waitForSelector('.rv-side .rv-c', { timeout: 10000 });
+  const whoSays = (await w.page.locator('.rv-side .rv-c .rv-who').first().innerText()).toLowerCase();
+  ok('Writer sees the comment, shown as from the Owner with no email address', whoSays.includes('owner') && !whoSays.includes('@') && (await w.page.locator('.rv-side').innerText()).includes('Please add a source.'), whoSays);
+  ok('Owner errors on pages (review)', o.page.errors.length === 0, o.page.errors.join(' | '));
   ok('Writer errors on pages', w.page.errors.length === 0, w.page.errors.join(' | '));
 
   // 6. Signing out

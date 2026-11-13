@@ -1,3 +1,7 @@
+// IBVU v6.11 — what changed in this file: article reviews and comments (database step 3)
+// are loaded for staff through two read functions (no email addresses), and every review
+// step goes through the article-review server function (callReview).
+//
 // IBVU v6.03 — what changed in this file since v6.02: newsletters (issues, the
 // sending record, list counts, sending through the send-newsletter function),
 // admin reminder settings and draft changes are read and written here too.
@@ -96,6 +100,14 @@ export const toReminderSettings = s => ({
   before_enabled: !!s.beforeEnabled, before_hours: Number(s.beforeHours) || 24, after_enabled: !!s.afterEnabled,
   updated_at: new Date().toISOString(),
 });
+export const fromReview = r => ({
+  articleId: r.article_id, state: r.state || "draft", note: r.note || "", sentAt: r.sent_at, backNote: r.back_note || "",
+  backBy: r.back_by || "", log: Array.isArray(r.log) ? r.log : [], updatedAt: r.updated_at, sentByMe: !!r.sent_by_me,
+});
+export const fromComment = r => ({
+  id: r.id, articleId: r.article_id, parentId: r.parent_id || null, role: r.author_role, quote: r.quote || "",
+  markId: r.mark_id || "", body: r.body || "", resolved: !!r.resolved, createdAt: r.created_at, mine: !!r.mine,
+});
 export const fromMessage = r => ({
   id: r.id, name: r.name, email: r.email, organisation: r.organisation || "", type: r.enquiry_type || "",
   message: r.message, wantsUpdates: !!r.wants_updates, createdAt: r.created_at,
@@ -154,13 +166,16 @@ export async function loadForStaff(client, session) {
   // not been run yet these are simply empty, and the rest of admin still works.
   const optional = p => p.then(r => (r.error ? null : r.data)).catch(() => null);
   const editorPlus = owner || session.role === "editor";
-  const [issues, sends, counts, drafts, reminderPeople, reminderSettings] = await Promise.all([
+  const [issues, sends, counts, drafts, reminderPeople, reminderSettings, reviews, comments] = await Promise.all([
     editorPlus ? optional(client.from("newsletter_issues").select("*").order("created_at", { ascending: false })) : Promise.resolve([]),
     owner ? optional(client.from("newsletter_sends").select("issue_id,email,status,error,sent_at").order("sent_at", { ascending: false }).limit(10000)) : Promise.resolve([]),
     editorPlus ? optional(client.rpc("newsletter_list_counts")) : Promise.resolve({}),
     optional(client.from("content_drafts").select("*")),
     owner ? optional(client.from("admin_reminder_recipients").select("*").order("created_at")) : Promise.resolve([]),
     owner ? optional(client.from("newsletter_reminder_settings").select("*").eq("id", 1).maybeSingle()) : Promise.resolve(null),
+    // Reviews and comments (database step 3); empty until step 3 has been run.
+    optional(client.rpc("article_reviews_list")),
+    optional(client.rpc("article_comments_list")),
   ]);
 
   const herbPhotos = {};
@@ -199,6 +214,9 @@ export async function loadForStaff(client, session) {
     reminderRecipients: (reminderPeople || []).map(r => ({ id: r.id, email: r.email })),
     ...(reminderSettings ? { reminderSettings: fromReminderSettings(reminderSettings) } : {}),
     newsletterReady: issues !== null,
+    reviews: Object.fromEntries((Array.isArray(reviews) ? reviews : []).map(r => [r.article_id, fromReview(r)])),
+    reviewComments: (Array.isArray(comments) ? comments : []).map(fromComment),
+    reviewReady: Array.isArray(reviews),
   };
 }
 
@@ -210,6 +228,25 @@ export async function callNewsletter(body) {
     if (r.error) {
       let message = r.error.message;
       try { const b = await r.error.context.json(); if (b && b.error) message = b.error; } catch { /* keep the general message */ }
+      return { ok: false, error: message };
+    }
+    return { ok: true, ...(r.data || {}) };
+  } catch {
+    return { ok: false, error: "Could not reach the website's server. Check your connection and try again." };
+  }
+}
+
+// The article-review function, as the signed-in person (see supabase/functions/article-review).
+export async function callReview(body) {
+  try {
+    const client = await getClient();
+    const r = await client.functions.invoke("article-review", { body });
+    if (r.error) {
+      let message = "", status = 0;
+      try { status = r.error.context.status || 0; const b = await r.error.context.json(); if (b && b.error) message = b.error; } catch { /* no message from the server */ }
+      if (!message) message = status === 404 || /Failed to send a request/i.test(r.error.message || "")
+        ? "The review step is not switched on yet: the article-review function needs deploying in Supabase."
+        : r.error.message;
       return { ok: false, error: message };
     }
     return { ok: true, ...(r.data || {}) };

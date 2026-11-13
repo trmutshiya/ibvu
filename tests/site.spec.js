@@ -1,3 +1,4 @@
+// IBVU v6.11 — what changed in this file: checks the review loop for articles (send for review, take back, comments on words and on the whole text, send back, reply, mark done, publish).
 // IBVU v6.10 — what changed in this file: checks that newsletter pictures and the cover start at tile size, resize by dragging in Write, the email and the web page, and show smaller on a phone.
 //
 // IBVU v6.09 — what changed in this file: checks for the whole-photo option, GMT/BST and the event preview, "← ibvu" going back, the smaller cookie card, the newsletter title box and missing-field message, picture size and caption in the email preview, the Sending history, and cover captions.
@@ -1038,6 +1039,95 @@ test.describe("admin (sign-in and roles)", () => {
       const shown = (await frame.locator("img[data-i='cover']").boundingBox()).width;
       expect(shown).toBeLessThan(page.viewportSize().width);
     }
+    await noSidewaysScroll(page);
+  });
+
+  test("v6.11 review: a Writer sends for review and takes it back; an Editor comments and sends it back; it is published without highlights", async ({ page }) => {
+    // the Owner adds a Writer and an Editor
+    await signIn(page, "hello@ibvu.org");
+    await addPerson(page, "amara@example.org", "writer");
+    await addPerson(page, "sam@example.org", "editor");
+    await signOut(page);
+
+    // the Writer writes and sends it for review
+    await signIn(page, "amara@example.org", "/admin/articles");
+    await page.getByRole("button", { name: "New article" }).click();
+    await page.locator("#ar-title").fill("Sleep and ashwagandha");
+    await page.locator(".rte-content .ProseMirror").click();
+    await page.keyboard.type("Three small trials found people fell asleep a little faster.");
+    await page.getByRole("button", { name: "Send for review…" }).click();
+    await page.locator("#rv-note").fill("Ready for a look.");
+    await page.getByRole("button", { name: "Send for review", exact: true }).click();
+    await expect(page.locator(".rv-banner.review")).toContainText("Waiting for review");
+    await expect(page.locator(".cadmin-note")).toContainText("the Editors and Owners");
+    await expect(page.locator("#ar-title")).toBeDisabled();
+    await expect(page.locator(".rte-content .ProseMirror")).toHaveAttribute("contenteditable", "false");
+    // sent by mistake: take it back, then send again
+    await page.getByRole("button", { name: "Take it back" }).click();
+    await expect(page.locator(".rv-banner")).toHaveCount(0);
+    await expect(page.locator("#ar-title")).toBeEnabled();
+    await page.getByRole("button", { name: "Send for review…" }).click();
+    await page.locator("#rv-note").fill("Ready for a look.");
+    await page.getByRole("button", { name: "Send for review", exact: true }).click();
+    await expect(page.locator(".rv-banner.review")).toBeVisible();
+    await signOut(page);
+
+    // the Editor sees it first, comments on some words and on the whole text, and sends it back
+    await signIn(page, "sam@example.org");
+    await expect(page.locator(".cadmin-home-card", { hasText: "Articles" })).toContainText("1 to review");
+    await page.goto("/admin/articles");
+    await expect(page.getByRole("heading", { name: /Waiting for your review/ })).toBeVisible();
+    await page.locator(".rv-first .cadmin-item", { hasText: "Sleep and ashwagandha" }).getByRole("button", { name: "Review" }).click();
+    await expect(page.locator(".rv-banner.review")).toContainText("Ready for a look.");
+    const words = page.locator(".rte-content .ProseMirror p").first();
+    await words.evaluate(el => { const r = document.createRange(); r.setStart(el.firstChild, 0); r.setEnd(el.firstChild, 18); const s = getSelection(); s.removeAllRanges(); s.addRange(r); });
+    await page.getByRole("button", { name: "Comment", exact: true }).click();
+    await page.locator("#rte-comment").fill("Which trials? Please add the references.");
+    await page.getByRole("button", { name: "Add comment" }).first().click();
+    await expect(page.locator(".rte-content mark[data-c]")).toHaveText("Three small trials");
+    await expect(page.locator(".rv-side .rv-c")).toHaveCount(1);
+    await page.locator("#rv-new").fill("Nice and clear overall.");
+    await page.locator(".rv-new").getByRole("button", { name: "Add comment" }).click();
+    await expect(page.locator(".rv-side .rv-c")).toHaveCount(2);
+    await page.getByRole("button", { name: "Send back to the writer…" }).click();
+    await page.locator("#rv-back").fill("Great start, two small things.");
+    await page.getByRole("button", { name: "Send it back" }).click();
+    await expect(page.locator(".rv-banner.changes")).toContainText("Great start, two small things.");
+    await expect(page.locator(".cadmin-note")).toContainText("the writer");
+    await page.waitForTimeout(1500); // the highlight is saved with the draft
+    await signOut(page);
+
+    // the Writer sees it at the top, replies, marks a comment done and sends it again
+    await signIn(page, "amara@example.org");
+    await expect(page.locator(".cadmin-home-card", { hasText: "Articles" })).toContainText("1 sent back");
+    await page.goto("/admin/articles");
+    await page.locator(".rv-first .cadmin-item", { hasText: "Sleep and ashwagandha" }).getByRole("button", { name: "Open and change" }).click();
+    await expect(page.locator(".rv-banner.changes")).toBeVisible();
+    await expect(page.locator(".rte-content mark[data-c]")).toHaveCount(1);
+    const first = page.locator(".rv-side .rv-c").first();
+    await expect(first.locator(".rv-who").first()).toContainText("Editor");
+    await first.locator("textarea").fill("Added the three references.");
+    await first.getByRole("button", { name: "Reply" }).click();
+    await expect(first).toContainText("Added the three references.");
+    await first.getByRole("button", { name: "Mark done" }).click();
+    await expect(page.locator(".rte-content mark[data-c]")).toHaveCount(0);
+    await expect(page.locator(".rv-side > .rv-c")).toHaveCount(1);
+    await page.getByRole("button", { name: "Send for review again…" }).click();
+    await page.getByRole("button", { name: "Send for review", exact: true }).click();
+    await expect(page.locator(".rv-banner.review")).toBeVisible();
+    await signOut(page);
+
+    // the Editor publishes it: the comments close and nothing is highlighted on the site
+    await signIn(page, "sam@example.org", "/admin/articles");
+    await page.locator(".rv-first .cadmin-item", { hasText: "Sleep and ashwagandha" }).getByRole("button", { name: "Review" }).click();
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(page.locator(".rv-banner")).toHaveCount(0);
+    await expect(page.locator(".rv-side > .rv-c")).toHaveCount(0);
+    await expect(page.locator(".rv-log")).toContainText("published it");
+    await page.goto("/media/sleep-and-ashwagandha");
+    await expect(page.getByRole("heading", { name: "Sleep and ashwagandha" })).toBeVisible();
+    await expect(page.locator(".article-body mark")).toHaveCount(0);
     await noSidewaysScroll(page);
   });
 

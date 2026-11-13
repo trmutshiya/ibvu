@@ -1,3 +1,6 @@
+// IBVU v6.11 — what changed in this file: comment highlights from admin's review are
+// never shown (stripReviewMarks), even if one were left in the text.
+//
 // IBVU v6.10 — what changed in this file: a newsletter's cover is shown at its own width
 // (tile size, 340 px, unless changed in admin) and shrinks in proportion on a phone;
 // pictures in a newsletter keep their own widths the same way. markPictures (admin's
@@ -43,7 +46,7 @@ import { useState, useEffect } from 'react';
 import Framed from './Framed.jsx';
 import { wholeSrc, captionOf, widthOf, shownWidth, TILE_W } from '../lib/frame.js';
 import { usePageTitle } from '../lib/site.js';
-import { useContent, usePublishedArticles, usePage, excerpt, formatDate, WRITING, sectionOf, articlePath } from '../lib/content.js';
+import { useContent, usePublishedArticles, usePage, excerpt, formatDate, WRITING, sectionOf, articlePath, stripReviewMarks } from '../lib/content.js';
 
 // One article laid out for reading. Also used by the preview in admin.
 // Pictures with a caption are wrapped in <figure> with the caption underneath.
@@ -82,7 +85,7 @@ export function Lightbox({ src, alt, onClose }) {
 }
 
 export function ArticleView({ article, share = true, markPictures = false }) {
-  const clean = withCaptions(DOMPurify.sanitize(article.body || "", { ADD_ATTR: ["target"] }));
+  const clean = withCaptions(DOMPurify.sanitize(stripReviewMarks(article.body || ""), { ADD_ATTR: ["target"] }));
   const [big, setBig] = useState(null);
   const cover = wholeSrc(article.cover);
   const coverCaption = captionOf(article.cover);

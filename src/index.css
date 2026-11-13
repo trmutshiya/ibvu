@@ -1,4 +1,9 @@
 /*
+  IBVU v6.11 — what changed in this file (at the end): the review step for articles and blog posts
+  (badges, the bar with Send for review / Take it back / Send back, the comments panel, comment
+  highlights in the text).
+*/
+/*
   IBVU v6.10 — what changed in this file (at the end): newsletter pictures and covers keep their own width
   (tile size to start), centred, smaller in proportion on a phone; the cover size box in Write; the size
   shown in the picture bar.
@@ -1681,3 +1686,49 @@ fieldset.nl-missing, .nl-body.nl-missing { border: 1px solid #b03a3a; border-rad
 .nl-cover-size-col { max-width: 544px; margin: 0 auto; text-align: center; line-height: 0; }
 .nl-cover-size-col img { display: inline-block; height: auto; max-width: 100%; }
 .rte-imagebar-size { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--sage); margin: 0 6px; align-self: center; }
+
+/* ── v6.11: articles and blog posts sent for review; comments ── */
+.cadmin-badge.rv-back { background: #f6dede; color: #a03030; }
+.cadmin-btn.warn { color: #8a5a00; border-color: #e6cf9a; }
+.cadmin-btn.warn:hover:not(:disabled) { color: #6d4700; border-color: #8a5a00; }
+.cadmin-btn.small { padding: 6px 10px; font-size: 10px; }
+.rv-bar { margin: 0 0 18px; }
+.rv-banner { margin: 0 0 12px; padding: 12px 14px; font-size: 1rem; line-height: 1.5; border: 1px solid; }
+.rv-banner.review { background: #fff6df; border-color: #ecd9a6; }
+.rv-banner.changes { background: #fbeeee; border-color: #e8c3c3; }
+.rv-banner q { font-style: italic; }
+.rv-ask { background: var(--cream); border: 1px solid var(--cream-dark); padding: 14px; max-width: 640px; }
+.rv-ask label { display: block; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 1px; color: var(--bark-light); margin-bottom: 6px; }
+.rv-ask textarea { width: 100%; margin-bottom: 10px; }
+.rv-ask .cadmin-hint { margin: 8px 0 0; }
+.rv-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+.rv-main { min-width: 0; }
+.rv-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.rv-fieldset:disabled .cadmin-title-input, .rv-fieldset:disabled input, .rv-fieldset:disabled textarea { opacity: 0.85; }
+.rte-readonly .rte-content .ProseMirror { background: #faf8f3; cursor: default; }
+.rv-side { background: white; border: 1px solid var(--cream-dark); padding: 16px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; }
+.rv-h { font-family: 'DM Mono', monospace; font-weight: 400; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--bark-light); margin: 0 0 12px; }
+.rv-c { border: 1px solid var(--cream-dark); border-left: 3px solid var(--gold); padding: 10px 12px; margin: 0 0 10px; background: #fffdf8; }
+.rv-c.done { border-left-color: var(--sage); opacity: 0.8; }
+.rv-quote { display: block; text-align: left; background: none; border: 0; padding: 0; margin: 0 0 6px; font: italic 0.95rem/1.4 'Crimson Pro', Georgia, serif; color: var(--muted); cursor: pointer; }
+button.rv-quote:hover { color: var(--bark); text-decoration: underline; }
+.rv-quote.whole { cursor: default; }
+.rv-who { font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--bark-light); margin: 0; }
+.rv-body { margin: 3px 0 8px; font-size: 1rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rv-reply { border-top: 1px dashed var(--cream-dark); padding-top: 6px; margin-top: 6px; }
+.rv-c textarea { width: 100%; font-size: 0.95rem; padding: 6px 8px; margin: 4px 0 6px; }
+.rv-new { margin: 6px 0 14px; }
+.rv-new label { display: block; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 1px; color: var(--bark-light); margin-bottom: 6px; }
+.rv-new textarea { width: 100%; margin-bottom: 6px; }
+.rv-done summary { cursor: pointer; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 1px; color: var(--sage); margin: 0 0 10px; }
+.rv-log { list-style: none; margin: 0; padding: 0; font-size: 0.92rem; color: var(--muted); }
+.rv-log li { padding: 4px 0; border-bottom: 1px dotted var(--cream-dark); }
+.rv-log strong { color: var(--bark); font-weight: 600; }
+.rte-content mark.rv-mark, mark[data-c] { background: #fbe39b; border-bottom: 2px solid var(--gold); padding: 0 1px; color: inherit; }
+.rte-content mark.rv-flash { background: #f5c94e; box-shadow: 0 0 0 3px rgba(201,168,76,0.5); }
+.rte-comment textarea { flex: 1 1 260px; }
+.cadmin-item.rv-attn { border-left: 4px solid var(--gold); }
+@media (max-width: 960px) {
+  .rv-layout { grid-template-columns: 1fr; }
+  .rv-side { position: static; max-height: none; }
+}

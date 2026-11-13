@@ -1,3 +1,11 @@
+// IBVU v6.11 — what changed in this file: sending articles and blog posts for review.
+// reviews ({ articleId: { state: draft | review | changes, note, sentAt, backNote, backBy,
+// log, sentByMe } }), reviewComments, reviewReady, and reviewAction(action, articleId, …):
+// send, takeback, sendback, comment, resolve, published. Connected: each step goes
+// through the article-review server function (which also sends the emails) after any
+// waiting saves have finished. Preview: the same rules are applied here and no email is
+// sent. stripReviewMarks removes comment highlights from an article's text.
+//
 // IBVU v6.09 — what changed in this file: ukZone / eventTime / ukMoment: event times are UK
 // time and show "GMT" or "BST" automatically from the date (e.g. "18:00 BST").
 //
@@ -84,6 +92,9 @@ const SEED = {
   reminderSettings: { dueEnabled: true, dueDay: 25, dueList: "monthly", beforeEnabled: true, beforeHours: 24, afterEnabled: true },
   showDraftChanges: false,
   messages: [],  // contact form messages (Owners only)
+  reviews: {},         // v6.11: articleId → where it is in the review
+  reviewComments: [],  // v6.11: comments on articles and blog posts
+  reviewReady: true,   // v6.11: connected: false until database step 3 has been run
   loaded: true,
   syncError: "",
 };
@@ -96,6 +107,7 @@ function connectedStart() {
     people: [], history: [], signups: [], messages: [], loaded: false, syncError: "",
     newsletters: [], newsletterSends: [], listCounts: null, drafts: {}, reminderRecipients: [],
     reminderSettings: { ...SEED.reminderSettings }, showDraftChanges: false,
+    reviews: {}, reviewComments: [], reviewReady: false,
   };
   try {
     const cached = JSON.parse(window.localStorage.getItem(CACHE_KEY) || "null");
@@ -279,6 +291,7 @@ function forgetStaffData(session) {
     people: [], history: [], pendingHerbPhotos: {}, signups: [], messages: [],
     newsletters: state.newsletters.filter(n => n.status === "sent" && n.showOnSite),
     newsletterSends: [], listCounts: null, drafts: {}, reminderRecipients: [], showDraftChanges: false,
+    reviews: {}, reviewComments: [],
   });
 }
 
@@ -457,8 +470,111 @@ export function setArticleStatus(id, status) {
 }
 export function deleteArticle(id) {
   const ar = state.articles.find(a => a.id === id); if (!ar) return { ok: false };
-  const result = commit(withHistory({ ...state, articles: state.articles.filter(a => a.id !== id) }, "deleted", WRITING[sectionOf(ar)].one, ar.title));
+  const reviews = { ...state.reviews }; delete reviews[id];   // the database removes these with the article
+  const result = commit(withHistory({ ...state, articles: state.articles.filter(a => a.id !== id), reviews, reviewComments: state.reviewComments.filter(c => c.articleId !== id) }, "deleted", WRITING[sectionOf(ar)].one, ar.title));
   save("the deletion", c => c.from("site_articles").delete().eq("id", id));
+  return result;
+}
+
+// v6.11: review. Comment highlights in an article's text: <mark data-c="…">…</mark>.
+export function stripReviewMarks(html) {
+  return String(html || "").replace(/<mark\b[^>]*\bdata-c="[^"]*"[^>]*>/g, "").replace(/<\/mark>/g, "");
+}
+// Preview: "sent by me" and "mine" follow whoever is signed in on this browser.
+export function useReview(articleId) {
+  const s = useContent();
+  const r = (articleId && s.reviews && s.reviews[articleId]) || null;
+  if (!r || CONNECTED) return r;
+  const se = readSession(s);
+  return { ...r, sentByMe: !!se && r.writerEmail === se.email };
+}
+export function useReviewComments(articleId) {
+  const s = useContent();
+  const list = (s.reviewComments || []).filter(c => c.articleId === articleId);
+  if (CONNECTED) return list;
+  const se = readSession(s);
+  return list.map(c => ({ ...c, mine: !!se && c.authorEmail === se.email }));
+}
+// Waits for every save that is still on its way to the database.
+export function finishSaving() { return queue; }
+
+const REVIEW_STEP = { send: "sent for review", takeback: "took back from review", sendback: "sent back for changes" };
+
+// Preview: the same rules as the server (supabase/functions/article-review).
+function previewReview(action, articleId, extra, session) {
+  const article = state.articles.find(a => a.id === articleId);
+  if (!article) return { ok: false, error: "This article was not found." };
+  const reviewer = session.role === "owner" || session.role === "editor";
+  const label = ROLES[session.role].name;
+  const old = state.reviews[articleId] || { articleId, state: "draft", note: "", sentAt: null, backNote: "", backBy: "", log: [], writerEmail: "" };
+  const at = now();
+  const logged = what => [...(old.log || []), { at, who: label, what }].slice(-100);
+  const all = state.reviewComments.filter(c => c.articleId === articleId);
+  const open = all.filter(c => !c.resolved && !c.parentId);
+  const reviewers = state.people.filter(p => (p.role === "owner" || p.role === "editor") && p.email !== session.email).length;
+  let next = null, comments = state.reviewComments, emailed = 0;
+  const text = (v, n) => String(v || "").trim().slice(0, n);
+  if (action === "send") {
+    if (old.state === "review") return { ok: false, error: "This is already waiting for review." };
+    const note = text(extra.note, 1000);
+    next = { ...old, state: "review", writerEmail: session.email, note, sentAt: at, log: logged("sent it for review" + (note ? ": “" + note + "”" : "")) };
+    emailed = reviewers;
+  } else if (action === "takeback") {
+    if (old.state !== "review") return { ok: false, error: "This is not waiting for review." };
+    if (!reviewer && old.writerEmail !== session.email) return { ok: false, error: "Only the person who sent it can take it back." };
+    next = { ...old, state: open.length || old.backNote ? "changes" : "draft", log: logged("took it back from review") };
+    emailed = reviewers;
+  } else if (action === "sendback") {
+    if (!reviewer) return { ok: false, error: "Only Editors and Owners can send it back." };
+    if (old.state !== "review") return { ok: false, error: "Only something sent for review can be sent back." };
+    const note = text(extra.note, 1000);
+    if (!note && !open.length) return { ok: false, error: "Add a note or a comment so the writer knows what to change." };
+    next = { ...old, state: "changes", backNote: note, backBy: label, log: logged("sent it back" + (open.length ? " with " + open.length + " comment" + (open.length === 1 ? "" : "s") : "")) };
+    emailed = old.writerEmail && old.writerEmail !== session.email ? 1 : 0;
+  } else if (action === "comment") {
+    const body = text(extra.body, 2000);
+    if (!body) return { ok: false, error: "Write the comment first." };
+    const parentId = extra.parentId || null;
+    comments = [...comments, { id: uid("cm"), articleId, parentId, role: session.role, quote: parentId ? "" : text(extra.quote, 300), markId: parentId ? "" : (extra.markId || ""), body, resolved: false, createdAt: at, mine: true, authorEmail: session.email }];
+    if (!parentId) next = { ...old, log: logged("added a comment") };
+    emailed = !parentId && reviewer && old.state === "changes" && old.writerEmail && old.writerEmail !== session.email ? 1 : 0;
+  } else if (action === "resolve") {
+    if (!all.some(c => c.id === extra.commentId)) return { ok: false, error: "That comment was not found." };
+    comments = comments.map(c => c.id === extra.commentId ? { ...c, resolved: true } : c);
+    next = { ...old, log: logged("marked a comment done") };
+  } else if (action === "published") {
+    if (!reviewer) return { ok: false, error: "Only Editors and Owners publish." };
+    comments = comments.map(c => c.articleId === articleId ? { ...c, resolved: true } : c);
+    emailed = old.writerEmail && old.writerEmail !== session.email && (old.state === "review" || old.state === "changes") ? 1 : 0;
+    next = { ...old, state: "draft", note: "", backNote: "", backBy: "", log: logged("published it") };
+  } else return { ok: false, error: "Unknown request." };
+  return { ok: true, emailed, next: next ? { ...next, updatedAt: at } : null, comments };
+}
+
+// One step of the review. Returns { ok, error?, emailed (how many people were emailed) }.
+export async function reviewAction(action, articleId, extra = {}) {
+  const session = readSession(state);
+  if (!session) return { ok: false, error: "Please sign in again." };
+  const article = state.articles.find(a => a.id === articleId);
+  let result;
+  if (CONNECTED) {
+    await queue;   // the article must be saved before the server looks at it
+    const r = await remote.callReview({ action, articleId, ...extra });
+    if (!r.ok) return r;
+    const reviews = { ...state.reviews };
+    if (r.review) reviews[articleId] = remote.fromReview(r.review);
+    const comments = [...state.reviewComments.filter(c => c.articleId !== articleId), ...(r.comments || []).map(remote.fromComment)];
+    commit({ ...state, reviews, reviewComments: comments });
+    result = { ok: true, emailed: r.emailed || 0 };
+  } else {
+    const r = previewReview(action, articleId, extra, session);
+    if (!r.ok) return r;
+    const withSender = r.next ? { ...r.next, sentByMe: r.next.writerEmail === session.email } : null;
+    const c = commit({ ...state, reviews: withSender ? { ...state.reviews, [articleId]: withSender } : state.reviews, reviewComments: r.comments });
+    if (!c.ok) return c;
+    result = { ok: true, emailed: r.emailed };
+  }
+  if (REVIEW_STEP[action] && article) commit(withHistory(state, REVIEW_STEP[action], WRITING[sectionOf(article)].one, article.title));
   return result;
 }
 
