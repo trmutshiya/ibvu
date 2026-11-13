@@ -1,3 +1,9 @@
+// IBVU v6.04 — what changed in this file: the Shop tiles, the Herb Mail Club and Events pictures and event
+// pictures are shown as framed in admin (moved, zoomed in). The Events page now
+// has Upcoming events (soonest first, picture about 240 × 160) and Past events
+// (newest first, small picture about 120 × 80, no Book button; the latest 6
+// with "Show all past events"). An event moves to Past the day after it happens.
+//
 // IBVU v6.02 — what changed in this file since v6.01: on Events (when no dates
 // are announced) and on the Coming soon pages, "email hello@ibvu.org" became
 // "subscribe to our newsletter", which scrolls to the newsletter box with
@@ -25,8 +31,10 @@ import Banner from './Banner.jsx';
 import { SmartLink } from './Innovate.jsx';
 import { ShareButtons, AddToCalendar } from './Share.jsx';
 import { usePageTitle } from '../lib/site.js';
-import { usePage, useUpcomingEvents, formatDate } from '../lib/content.js';
+import { useState } from 'react';
+import { usePage, useUpcomingEvents, usePastEvents, formatDate } from '../lib/content.js';
 import { openNewsletter } from '../lib/lists.js';
+import Framed from './Framed.jsx';
 import mailClubImg from '../assets/shop-mail-club.jpg';
 import eventsImg from '../assets/shop-events.jpg';
 
@@ -37,8 +45,8 @@ export default function Shop() {
   usePageTitle("Shop");
   const c = usePage("shop");
   const featured = [
-    { slug: "mail", title: c.mailTitle, text: c.mailTile, link: c.mailTileLink, image: c.mailImage || mailClubImg, alt: MAIL_ALT },
-    { slug: "events", title: c.eventsTitle, text: c.eventsTile, link: c.eventsTileLink, image: c.eventsImage || eventsImg, alt: EVENTS_ALT },
+    { slug: "mail", title: c.mailTitle, text: c.mailTile, link: c.mailTileLink, image: c.mailImage, fallback: mailClubImg, alt: MAIL_ALT },
+    { slug: "events", title: c.eventsTitle, text: c.eventsTile, link: c.eventsTileLink, image: c.eventsImage, fallback: eventsImg, alt: EVENTS_ALT },
   ];
   return (
     <div className="page-shell">
@@ -52,7 +60,7 @@ export default function Shop() {
           {featured.map(s => (
             <Link className="shop-feature" to={"/shop/" + s.slug} key={s.slug}>
               <div className="shop-feature-image">
-                <img src={s.image} alt={s.alt} width="900" height="1125" />
+                <Framed value={s.image} fallback={s.fallback} alt={s.alt} width="900" height="1125" />
               </div>
               <div className="shop-feature-text">
                 <h2 className="shop-tile-title">{s.title}</h2>
@@ -93,11 +101,27 @@ function NotifyLine({ text }) {
     : part);
 }
 
+// A past event: small picture, date, title and place.
+function PastEvent({ event }) {
+  return (
+    <li className="past-event" id={"event-" + event.id}>
+      {event.image ? <span className="past-event-image"><Framed value={event.image} ratio="3/2" alt="" loading="lazy" /></span> : <span className="past-event-image empty" aria-hidden="true" />}
+      <span className="past-event-text">
+        <span className="event-tile-date">{formatDate(event.date)}</span>
+        <span className="past-event-title">{event.title}</span>
+        {event.location && <span className="event-tile-place">{event.location}</span>}
+      </span>
+    </li>
+  );
+}
+
+const PAST_SHOWN = 6;
+
 function EventTile({ event }) {
   const path = "/shop/events";
   return (
     <article className="event-tile" id={"event-" + event.id}>
-      {event.image && <div className="event-tile-image"><img src={event.image} alt="" loading="lazy" /></div>}
+      {event.image && <div className="event-tile-image"><Framed value={event.image} ratio="3/2" alt="" loading="lazy" /></div>}
       <div className="event-tile-text">
         <p className="event-tile-date">{formatDate(event.date)}{event.time ? " · " + event.time : ""}</p>
         <h3 className="event-tile-title">{event.title}</h3>
@@ -117,6 +141,8 @@ export function ShopSection() {
   const { section } = useParams();
   const c = usePage("shop");
   const events = useUpcomingEvents();
+  const past = usePastEvents();
+  const [allPast, setAllPast] = useState(false);
   const extra = c.more.find(t => t.slug === section);
   const title = section === "mail" ? c.mailTitle : section === "events" ? c.eventsTitle : extra ? extra.title : null;
   usePageTitle(title || "Page not found");
@@ -157,7 +183,7 @@ export function ShopSection() {
         <main className="page-main">
           <div className="product-layout">
             <div className="product-image">
-              <img src={c.mailImage || mailClubImg} alt={MAIL_ALT} width="900" height="1125" />
+              <Framed value={c.mailImage} fallback={mailClubImg} alt={MAIL_ALT} width="900" height="1125" />
             </div>
             <div className="product-text">
               <p className="page-eyebrow">✦ Shop ✦</p>
@@ -190,7 +216,7 @@ export function ShopSection() {
       <main className="page-main">
         <div className="product-layout">
           <div className="product-image">
-            <img src={c.eventsImage || eventsImg} alt={EVENTS_ALT} width="900" height="1125" />
+            <Framed value={c.eventsImage} fallback={eventsImg} alt={EVENTS_ALT} width="900" height="1125" />
           </div>
           <div className="product-text">
             <p className="page-eyebrow">✦ Shop ✦</p>
@@ -208,6 +234,16 @@ export function ShopSection() {
           <section className="tile-section">
             <h2 className="section-heading">Upcoming events</h2>
             <div className="event-list">{events.map(e => <EventTile event={e} key={e.id} />)}</div>
+          </section>
+        )}
+
+        {past.length > 0 && (
+          <section className="tile-section past-events">
+            <h2 className="section-heading">Past events</h2>
+            <ul className="past-event-list">{(allPast ? past : past.slice(0, PAST_SHOWN)).map(e => <PastEvent event={e} key={e.id} />)}</ul>
+            {past.length > PAST_SHOWN && !allPast && (
+              <button type="button" className="page-btn past-more" onClick={() => setAllPast(true)}>Show all past events ({past.length})</button>
+            )}
           </section>
         )}
       </main>

@@ -1,3 +1,6 @@
+// IBVU v6.04 — what changed in this file since v6.03: usePastEvents (published
+// events whose date has passed, newest first) for the new Past events list.
+//
 // IBVU v6.03 — what changed in this file since v6.02:
 // - Newsletters: issues (newsletters), the record of who received each one
 //   (newsletterSends), how many confirmed people are on each list
@@ -158,6 +161,15 @@ export function useUpcomingEvents() {
   return s.events
     .filter(e => e.status === "published" && e.date && e.date >= today)
     .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+}
+
+// Published events whose date has passed, newest first.
+export function usePastEvents() {
+  const s = useContent();
+  const today = todayISO();
+  return s.events
+    .filter(e => e.status === "published" && e.date && e.date < today)
+    .sort((a, b) => (b.date + (b.time || "")).localeCompare(a.date + (a.time || "")));
 }
 
 // The two places writing is published. Articles go to Media, posts go to the Blog.

@@ -1,3 +1,15 @@
+// IBVU v6.05 — what changed in this file: a picture whose size was set by
+// dragging keeps that size when it has a caption.
+//
+// IBVU v6.04 — what changed in this file:
+// - Tiles show the cover as framed in admin. The open article shows the whole
+//   cover in its own shape at the width of the text (as Medium does).
+// - Pictures inside the text can be small, medium, large or full width, placed
+//   left, centre or right, and can have a caption underneath (set in admin;
+//   the styles are in index.css).
+// - Clicking a picture in an article opens it full screen; ✕, Esc or a click
+//   closes it.
+//
 // IBVU v6.0 — what changed in this file: an article or post opened by its address waits for the content to arrive from the database before deciding the page does not exist.
 //
 // IBVU v5.9 — what changed in this file: Blog pages now carry the small Educate disclaimer in the footer, like the Herbarium; and the Media and Blog headings and their "coming soon" lines now come from admin → Pages → Media and Blog (same wording as before until edited).
@@ -16,12 +28,55 @@ import SiteHeader from './SiteHeader.jsx';
 import SiteFooter from './SiteFooter.jsx';
 import NotFound from './NotFound.jsx';
 import { ShareButtons } from './Share.jsx';
+import { useState, useEffect } from 'react';
+import Framed from './Framed.jsx';
+import { wholeSrc } from '../lib/frame.js';
 import { usePageTitle } from '../lib/site.js';
 import { useContent, usePublishedArticles, usePage, excerpt, formatDate, WRITING, sectionOf, articlePath } from '../lib/content.js';
 
 // One article laid out for reading. Also used by the preview in admin.
+// Pictures with a caption are wrapped in <figure> with the caption underneath.
+function withCaptions(html) {
+  if (!html.includes("data-caption") || typeof DOMParser === "undefined") return html;
+  const doc = new DOMParser().parseFromString("<div>" + html + "</div>", "text/html");
+  doc.querySelectorAll("img[data-caption]").forEach(img => {
+    const fig = doc.createElement("figure");
+    fig.className = "article-figure";
+    ["data-size", "data-align"].forEach(a => { if (img.hasAttribute(a)) fig.setAttribute(a, img.getAttribute(a)); });
+    if (img.style.width) { fig.style.width = img.style.width; img.style.width = ""; } // a dragged size belongs to the figure
+    const cap = doc.createElement("figcaption");
+    cap.textContent = img.getAttribute("data-caption");
+    const holder = img.parentNode.tagName === "P" && img.parentNode.childNodes.length === 1 ? img.parentNode : img;
+    holder.replaceWith(fig);
+    fig.appendChild(img);
+    fig.appendChild(cap);
+  });
+  return doc.body.firstChild.innerHTML;
+}
+
+// Full-screen view of a picture.
+function Lightbox({ src, alt, onClose }) {
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="lightbox" role="dialog" aria-modal="true" aria-label="Picture, full size" onClick={onClose}>
+      <button type="button" className="lightbox-close" aria-label="Close" onClick={onClose}>✕</button>
+      <img src={src} alt={alt || ""} />
+    </div>
+  );
+}
+
 export function ArticleView({ article, share = true }) {
-  const clean = DOMPurify.sanitize(article.body || "", { ADD_ATTR: ["target"] });
+  const clean = withCaptions(DOMPurify.sanitize(article.body || "", { ADD_ATTR: ["target"] }));
+  const [big, setBig] = useState(null);
+  const cover = wholeSrc(article.cover);
+  const openPicture = e => {
+    const img = e.target.closest && e.target.closest("img");
+    if (img) setBig({ src: img.currentSrc || img.src, alt: img.alt });
+  };
   return (
     <article className="article">
       <header className="article-header">
@@ -32,8 +87,9 @@ export function ArticleView({ article, share = true }) {
         <h1>{article.title || "Untitled"}</h1>
         {article.summary && <p className="article-summary">{article.summary}</p>}
       </header>
-      {article.cover && <img className="article-cover" src={article.cover} alt="" />}
-      <div className="article-body" dangerouslySetInnerHTML={{ __html: clean }} />
+      {cover && <button type="button" className="article-cover-btn" onClick={() => setBig({ src: cover, alt: "" })} aria-label="View the picture full size"><img className="article-cover" src={cover} alt="" /></button>}
+      <div className="article-body" onClick={openPicture} dangerouslySetInnerHTML={{ __html: clean }} />
+      {big && <Lightbox src={big.src} alt={big.alt} onClose={() => setBig(null)} />}
       {share && article.status === "published" && <ShareButtons path={articlePath(article)} text={article.title} label={sectionOf(article) === "blog" ? "Share this post" : "Share this article"} />}
     </article>
   );
@@ -65,7 +121,7 @@ function WritingIndex({ section }) {
           <div className="media-grid">
             {articles.map(a => (
               <Link className="media-tile" to={articlePath(a)} key={a.id}>
-                <div className="media-tile-image">{a.cover && <img src={a.cover} alt="" loading="lazy" />}</div>
+                <div className="media-tile-image">{a.cover && <Framed value={a.cover} alt="" loading="lazy" />}</div>
                 <div className="media-tile-text">
                   <p className="media-tile-date">{formatDate(a.publishedAt, false)}</p>
                   <h2 className="media-tile-title">{a.title}</h2>

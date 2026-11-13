@@ -1,3 +1,5 @@
+// IBVU v6.04 — what changed in this file: the footer logo is shown as framed in admin.
+//
 // IBVU v6.03 — what changed in this file: a "Read past issues" link under the newsletter sign-up.
 //
 // IBVU v6.02 — what changed in this file since v6.0:
@@ -30,6 +32,7 @@ import { usePage, PREVIEW_MODE } from '../lib/content.js';
 import { useTurnstile } from '../lib/turnstile.js';
 import { MAILING_LISTS, listNames } from '../lib/lists.js';
 import logoImg from '../assets/ibvu-logo.webp';
+import Framed from './Framed.jsx';
 
 function Newsletter() {
   const c = usePage("site");
@@ -143,7 +146,7 @@ export default function SiteFooter({ disclaimer = false }) {
       <Newsletter />
       <footer className="site-footer">
         <div className="footer-inner">
-          <img className="footer-logo" src={c.footerLogo || logoImg} alt="IBVU. Regulate, Educate, Innovate." width="170" height="170" loading="lazy" />
+          <Framed className="footer-logo" value={c.footerLogo} fallback={logoImg} alt="IBVU. Regulate, Educate, Innovate." width="170" height="170" loading="lazy" />
 
           {disclaimer && herbarium.disclaimer && (
             <p className="disclaimer-small">

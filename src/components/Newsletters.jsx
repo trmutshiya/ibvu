@@ -1,3 +1,5 @@
+// IBVU v6.04 — what changed in this file: covers are shown as framed in admin.
+//
 // IBVU v6.03 — new file. The newsletter on the website:
 //   ibvu.org/newsletter            past issues as tiles, newest first
 //   ibvu.org/newsletter/issue-name one issue, as it was sent
@@ -8,6 +10,7 @@ import SiteHeader from './SiteHeader.jsx';
 import SiteFooter from './SiteFooter.jsx';
 import NotFound from './NotFound.jsx';
 import { ArticleView } from './Media.jsx';
+import Framed from './Framed.jsx';
 import { usePageTitle } from '../lib/site.js';
 import { useContent, usePublishedIssues, issueAsArticle, formatDate } from '../lib/content.js';
 import { openNewsletter, listNames } from '../lib/lists.js';
@@ -30,7 +33,7 @@ export function NewsletterIndex() {
           <div className="media-grid">
             {issues.map(n => (
               <Link className="media-tile" to={"/newsletter/" + n.slug} key={n.id}>
-                <div className="media-tile-image">{n.cover && <img src={n.cover} alt="" loading="lazy" />}</div>
+                <div className="media-tile-image">{n.cover && <Framed value={n.cover} alt="" loading="lazy" />}</div>
                 <div className="media-tile-text">
                   <p className="media-tile-date">{formatDate((n.sentAt || "").slice(0, 10), false)}</p>
                   <h2 className="media-tile-title">{n.title}</h2>

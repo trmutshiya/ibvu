@@ -1,3 +1,7 @@
+// IBVU v6.04 — what changed in this file: the cover picture can be framed for
+// its tile on ibvu.org/newsletter. The email and the open issue show the whole
+// picture, as an article does.
+//
 // IBVU v6.03 — new file. Admin → Newsletters (ibvu.org/admin/newsletters).
 //
 // Newsletters are written here like blog posts and then emailed to one or
@@ -31,7 +35,7 @@ import { mergeHerbs } from '../../lib/herbs.js';
 import { HERBS_FALLBACK } from '../../constants/herbs.js';
 import { sbFetchApproved, sbFetchStaticHerbs } from '../../lib/supabase.js';
 import { ArticleView } from '../Media.jsx';
-import { DeleteButton, ImageField } from './bits.jsx';
+import { DeleteButton, ImageField, SHAPES } from './bits.jsx';
 import emailLogo from '../../assets/email-logo.png';
 
 const RichEditor = lazy(() => import('./RichEditor.jsx'));
@@ -371,7 +375,7 @@ function IssueEditor({ initial, role, onBack, onError }) {
                 Show on the website once sent (ibvu.org/newsletter)
               </label>
             </fieldset>
-            <div className="cadmin-field"><label>Cover image (optional)</label><ImageField value={n.cover} label="Cover image" folder="newsletters" onChange={cover => change({ cover })} onError={onError} /></div>
+            <div className="cadmin-field"><label>Cover image (optional)</label><ImageField value={n.cover} label="Cover image" folder="newsletters" shapes={[SHAPES.tile]} hint="Framing sets the tile on ibvu.org/newsletter. The email and the open issue show the whole picture." onChange={cover => change({ cover })} onError={onError} /></div>
           </div>
           <AddFromSite editorRef={editorRef} />
           <Suspense fallback={<p className="cadmin-hint">Loading the editor…</p>}>

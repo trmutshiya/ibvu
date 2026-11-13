@@ -1,3 +1,13 @@
+// IBVU v6.05 — what changed in this file since v6.04: the framing window is used by
+// dragging (move the picture, drag a corner to resize, Larger / Smaller buttons, never
+// smaller than the box); pictures in the text are resized by dragging their handles,
+// snapping to the standard sizes.
+//
+// IBVU v6.04 — what changed in this file since v6.03: checks picture framing (event
+// picture, a built-in Shop photo, zoom in only), the open article showing the whole
+// cover, pictures inside the text (size, position, caption, crop window), the
+// full-screen picture view, and Upcoming / Past events.
+//
 // IBVU v6.03 — what changed in this file since v6.02: checks newsletters (write, add from
 // the site, preview as email and web page, test, send, the sent record, the archive at
 // /newsletter, hide and Copy to Blog), scheduling in UK time and cancelling, who may send,
@@ -605,6 +615,147 @@ test.describe("admin (sign-in and roles)", () => {
     await page.getByRole("button", { name: "Discard draft changes" }).click();
     await page.getByRole("button", { name: "Yes, discard" }).click();
     await expect(page.locator("#pg-lead")).not.toHaveValue("Draft wording for Contact.");
+  });
+
+  test("pictures: framing (move and zoom in), built-in photos, events past and upcoming", async ({ page }) => {
+    const photo = "src/assets/pillar-educate.jpg";
+    await signIn(page, "hello@ibvu.org", "/admin/events");
+    // an upcoming event with a picture: the framing window opens after choosing it
+    await page.getByRole("button", { name: "New event" }).click();
+    await page.locator("#ev-title").fill("Spring herb walk");
+    await page.locator("#ev-date").fill("2099-04-10");
+    await page.locator(".cadmin-image input[type=file]").setInputFiles(photo);
+    const dialog = page.getByRole("dialog", { name: /Frame the image/ });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("Size 100% (just fills the box)")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "− Smaller" })).toBeDisabled();   // never smaller than the box
+    // drag the bottom-right corner outwards: larger
+    const corner = await dialog.locator(".frame-handle.br").boundingBox();
+    await page.mouse.move(corner.x + 10, corner.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(corner.x + 60, corner.y + 50, { steps: 6 });
+    await page.mouse.up();
+    await expect(dialog.locator(".frame-size")).not.toHaveText(/Size 100%/);
+    // drag the top-left corner far inwards: back to just filling the box
+    const tl = await dialog.locator(".frame-handle.tl").boundingBox();
+    await page.mouse.move(tl.x + 10, tl.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(tl.x + 400, tl.y + 300, { steps: 6 });
+    await page.mouse.up();
+    await expect(dialog.getByText("Size 100% (just fills the box)")).toBeVisible();
+    // the buttons, and moving with the keyboard
+    await dialog.getByRole("button", { name: "Larger +" }).click();
+    await dialog.getByRole("button", { name: "Larger +" }).click();
+    await expect(dialog.locator(".frame-size")).toHaveText("Size 121%");
+    await dialog.locator(".frame-clip").focus();
+    await page.keyboard.press("ArrowLeft");
+    await noSidewaysScroll(page);
+    await dialog.getByRole("button", { name: "Save" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByText("Best at least 1200 pixels wide.")).toBeVisible();
+    await page.locator(".cadmin-card").getByRole("button", { name: "Publish" }).click();
+
+    // a past event (no picture)
+    await page.getByRole("button", { name: "New event" }).click();
+    await page.locator("#ev-title").fill("Autumn lecture");
+    await page.locator("#ev-date").fill("2020-10-01");
+    await page.locator(".cadmin-card").getByRole("button", { name: "Publish" }).click();
+
+    await page.goto("/shop/events");
+    await expect(page.getByRole("heading", { name: "Upcoming events" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Past events" })).toBeVisible();
+    const upcoming = page.locator(".event-tile", { hasText: "Spring herb walk" });
+    await expect(upcoming.locator("[data-framed] .framed-move")).toHaveAttribute("style", /scale\(1\.21\)/);
+    const box = await upcoming.locator(".event-tile-image").boundingBox();
+    if (page.viewportSize().width > 720) expect(box.width).toBeLessThanOrEqual(241);
+    await expect(page.locator(".past-event", { hasText: "Autumn lecture" })).toBeVisible();
+    await expect(page.locator(".past-event", { hasText: "Autumn lecture" }).getByText("Book a place")).toHaveCount(0);
+    await noSidewaysScroll(page);
+
+    // a built-in photo can be framed too (Shop → Herb Mail Club)
+    await page.goto("/admin/pages?page=shop");
+    const mail = page.locator(".cadmin-field", { hasText: "keep the collage" });
+    await mail.getByRole("button", { name: "Frame picture" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Larger +" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+    await page.getByRole("button", { name: "Publish changes" }).click();
+    await page.goto("/shop");
+    await expect(page.locator(".shop-feature").first().locator(".framed-move")).toHaveAttribute("style", /scale\(1\.1\)/);
+    // and back to the original
+    await page.goto("/admin/pages?page=shop");
+    await mail.getByRole("button", { name: "Reset framing" }).click();
+    await page.getByRole("button", { name: "Publish changes" }).click();
+    await page.goto("/shop");
+    await expect(page.locator(".shop-feature").first().locator("[data-framed]")).toHaveCount(0);
+  });
+
+  test("pictures in articles: whole cover, sizes, position, caption, full-screen view", async ({ page }) => {
+    const photo = "src/assets/pillar-educate.jpg";
+    await signIn(page, "hello@ibvu.org", "/admin/articles");
+    await page.getByRole("button", { name: "New article" }).click();
+    await page.locator("#ar-title").fill("Pictures test");
+    // cover: framing sets the tile only
+    await page.locator(".cadmin-image input[type=file]").first().setInputFiles(photo);
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Larger +" }).click();
+    await dialog.getByRole("button", { name: "Save" }).click();
+    // a picture inside the text
+    await page.locator(".rte-content .ProseMirror").click();
+    await page.keyboard.type("Some text before the picture.");
+    await page.locator(".rte input[type=file]").setInputFiles(photo);
+    const crop = page.getByRole("dialog", { name: /Crop and frame/ });
+    await expect(crop).toBeVisible();
+    await crop.getByRole("button", { name: "Square" }).click();
+    await crop.getByRole("button", { name: "Save" }).click();
+    await expect(crop).toHaveCount(0);
+    // the cursor moves below the picture: typing does not replace it
+    await page.keyboard.type("Text after the picture.");
+    await expect(page.locator(".rte-content img")).toHaveCount(1);
+    await page.locator(".rte-content img").click();
+    const bar = page.getByRole("toolbar", { name: "Picture" });
+    await expect(bar).toBeVisible();
+    // drag the right-hand handle inwards: smaller, with a size label while dragging
+    const pic = page.locator(".rte-pic");
+    const full = (await pic.boundingBox()).width;
+    const mr = await pic.locator(".rte-handle.mr").boundingBox();
+    await page.mouse.move(mr.x + 6, mr.y + 14);
+    await page.mouse.down();
+    await page.mouse.move(mr.x - full * 0.2, mr.y + 14, { steps: 6 });
+    await expect(page.locator(".rte-size-tip")).toBeVisible();
+    await page.mouse.up();
+    expect((await pic.boundingBox()).width).toBeLessThan(full * 0.8);
+    await bar.getByRole("button", { name: "Small" }).click();
+    await bar.getByRole("button", { name: "Left" }).click();
+    await bar.getByRole("button", { name: "Caption…" }).click();
+    await page.locator("#rte-caption").fill("Students in a lecture");
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(bar.getByRole("button", { name: "Undo crop" })).toBeVisible();
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await page.getByRole("button", { name: "Close" }).click();
+
+    // the tile is framed; the open article shows the whole cover
+    await page.goto("/media");
+    await expect(page.locator(".media-tile", { hasText: "Pictures test" }).locator(".framed-move")).toHaveAttribute("style", /scale\(1\.1\)/);
+    await page.goto("/media/pictures-test");
+    const cover = page.locator("img.article-cover");
+    await expect(cover).toBeVisible();
+    expect(await cover.getAttribute("src")).not.toContain("#frame=");
+    const fig = page.locator(".article-body figure.article-figure");
+    await expect(fig).toHaveAttribute("data-size", "small");
+    await expect(fig).toHaveAttribute("data-align", "left");
+    await expect(fig.locator("figcaption")).toHaveText("Students in a lecture");
+    // square crop
+    const ib = await fig.locator("img").boundingBox();
+    expect(Math.abs(ib.width - ib.height)).toBeLessThan(3);
+    // full-screen view
+    await fig.locator("img").click();
+    await expect(page.getByRole("dialog", { name: "Picture, full size" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Picture, full size" })).toHaveCount(0);
+    await cover.click();
+    await expect(page.getByRole("dialog", { name: "Picture, full size" })).toBeVisible();
+    await page.getByRole("button", { name: "Close" }).click();
+    await noSidewaysScroll(page);
   });
 
   test("every page has a form in admin", async ({ page }) => {

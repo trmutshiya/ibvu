@@ -1,3 +1,6 @@
+// IBVU v6.04 — what changed in this file: the cover is the whole picture (its
+// framing only applies to the tile on the website).
+//
 // IBVU v6.03 — new file. How a newsletter looks as an email.
 //
 // Used by admin's "Preview as email". The server's send-newsletter function
@@ -6,6 +9,8 @@
 //
 // Email programs (Gmail, Outlook, phones) ignore most page styling, so the
 // layout is one simple column with the styles written onto each element.
+import { wholeSrc } from './frame.js';
+
 export const SITE_URL = "https://ibvu.org";
 
 const C = { bark: "#3d2c1e", text: "#2c1810", muted: "#6c6354", sage: "#4d6b4d", cream: "#f5f0e8", line: "#e3d9c6" };
@@ -38,7 +43,7 @@ ${viewUrl ? `<tr><td style="padding:10px 28px;font-family:Arial,sans-serif;font-
 <tr><td align="center" style="padding:28px 28px 8px"><img src="${esc(logoUrl)}" width="96" height="96" alt="IBVU" style="display:block;border:0"></td></tr>
 <tr><td style="padding:8px 28px 0;font-family:Georgia,serif">
 <h1 style="font-family:Georgia,serif;font-weight:normal;font-size:30px;line-height:1.25;color:${C.bark};margin:12px 0 18px;text-align:center">${esc(issue.title)}</h1>
-${issue.cover ? `<img src="${esc(issue.cover)}" alt="" width="544" style="display:block;width:100%;max-width:544px;height:auto;border:0;margin:0 0 22px">` : ""}
+${issue.cover ? `<img src="${esc(wholeSrc(issue.cover))}" alt="" width="544" style="display:block;width:100%;max-width:544px;height:auto;border:0;margin:0 0 22px">` : ""}
 ${styleForEmail(issue.body)}
 </td></tr>
 <tr><td style="padding:22px 28px 28px;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;color:${C.muted};border-top:1px solid ${C.line}">

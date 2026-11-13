@@ -1,3 +1,16 @@
+// IBVU v6.04 — what changed in this file since v6.03:
+// - Every picture can be framed: after choosing a picture the framing window
+//   opens (move, zoom bigger or smaller, fill or show the whole picture, turn,
+//   reset), and "Frame picture" reopens it. This covers event pictures,
+//   article and blog covers, every page picture (also the built-in photos)
+//   and herb photos ("Frame photo" in Herb photos). Each one is shown in the
+//   shape it has on the site. Framing means move and zoom in (crop); a picture
+//   always fills its box.
+// - Fix: if an editor was opened before saved draft changes had finished
+//   loading, it showed the live version and "Publish changes" could throw the
+//   draft away. The draft changes are now filled in as soon as they arrive
+//   (unless something has already been typed).
+//
 // IBVU v6.03 — what changed in this file since v6.02:
 // - New section for Owners and Editors: Newsletters (ibvu.org/admin/newsletters,
 //   in NewslettersAdmin.jsx): write, preview, test, send or schedule, the sent
@@ -94,7 +107,10 @@ import { SUPABASE_READY, sbFetchApproved, sbFetchStaticHerbs } from '../../lib/s
 const RichEditor = lazy(() => import('./RichEditor.jsx'));
 const AdminPanel = lazy(() => import('../AdminPanel.jsx'));
 const NewslettersAdmin = lazy(() => import('./NewslettersAdmin.jsx'));
-import { DeleteButton, ImageField } from './bits.jsx';
+import { DeleteButton, ImageField, SHAPES } from './bits.jsx';
+import FrameEditor, { FramePreview } from './FrameEditor.jsx';
+import { BUILTIN_IMAGES, IMAGE_SHAPES } from '../../content/builtinImages.js';
+import { parseImage, buildImage } from '../../lib/frame.js';
 import AdminSignIn from './AdminSignIn.jsx';
 import { DEMO_SIGN_IN } from '../../lib/auth.js';
 
@@ -157,7 +173,11 @@ function EventForm({ initial, role, onDone, onError, onPublished }) {
     return d ? { ...initial, ...d.data } : initial;
   });
   const [problem, setProblem] = useState("");
-  const set = key => e => setEv(v => ({ ...v, [key]: e.target.value }));
+  const touched = useRef(false);
+  const set = key => e => { touched.current = true; setEv(v => ({ ...v, [key]: e.target.value })); };
+  // Draft changes that arrive after the form opened are filled in.
+  const waitingAt = waiting && waiting.updatedAt;
+  useEffect(() => { if (waiting && isLive && !touched.current) setEv(v => ({ ...v, ...waiting.data })); }, [waitingAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function save(publish) {
     if (!ev.title.trim()) { setProblem("Give the event a title."); return; }
@@ -198,7 +218,7 @@ function EventForm({ initial, role, onDone, onError, onPublished }) {
         <div className="cadmin-field wide"><label htmlFor="ev-place">Place</label><input id="ev-place" value={ev.location} onChange={set("location")} placeholder="Venue and city, or Online" /></div>
         <div className="cadmin-field wide"><label htmlFor="ev-desc">Description</label><textarea id="ev-desc" rows="4" value={ev.description} onChange={set("description")} /></div>
         <div className="cadmin-field wide"><label htmlFor="ev-book">Booking link (optional)</label><input id="ev-book" type="url" value={ev.bookingUrl} onChange={set("bookingUrl")} placeholder="https://…" /></div>
-        <div className="cadmin-field wide"><label>Image (optional)</label><ImageField value={ev.image} folder="events" onChange={image => setEv(v => ({ ...v, image }))} onError={onError} /></div>
+        <div className="cadmin-field wide"><label>Image (optional)</label><ImageField value={ev.image} folder="events" shapes={[SHAPES.event]} onChange={image => { touched.current = true; setEv(v => ({ ...v, image })); }} onError={onError} /></div>
       </div>
       {problem && <p className="cadmin-problem" role="alert">{problem}</p>}
       {ev.date && ev.date < todayISO() && <p className="cadmin-hint">This date has passed, so the event will not show on the site.</p>}
@@ -291,6 +311,14 @@ function ArticleEditor({ initial, role, onBack, onError, onPublished }) {
   const latest = useRef(a); latest.current = a;
   const isLive = a.status === "published";
   const mayPublish = can(role, "publish");
+  // Draft changes that arrive after the editor opened are filled in.
+  const waitingAt = waiting && waiting.updatedAt;
+  const [bodyKey, setBodyKey] = useState(0);
+  useEffect(() => {
+    if (!waiting || !isLive || saveState === "unsaved") return;
+    if (waiting.data.body !== latest.current.body) setBodyKey(k => k + 1);
+    setA(v => ({ ...v, ...waiting.data }));
+  }, [waitingAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function change(patch) { setA(v => ({ ...v, ...patch })); setSaveState("unsaved"); }
 
@@ -380,10 +408,10 @@ function ArticleEditor({ initial, role, onBack, onError, onPublished }) {
           <div className="cadmin-grid2">
             <div className="cadmin-field wide"><label htmlFor="ar-summary">Short summary for the tile (optional; the opening lines are used if empty)</label><textarea id="ar-summary" rows="2" value={a.summary} onChange={e => change({ summary: e.target.value })} /></div>
             <div className="cadmin-field"><label htmlFor="ar-author">Author (optional)</label><input id="ar-author" value={a.author} onChange={e => change({ author: e.target.value })} /></div>
-            <div className="cadmin-field"><label>Cover image</label><ImageField value={a.cover} label="Cover image" folder="articles" onChange={cover => change({ cover })} onError={onError} /></div>
+            <div className="cadmin-field"><label>Cover image</label><ImageField value={a.cover} label="Cover image" folder="articles" shapes={[SHAPES.tile]} hint="Framing sets the tile. The open article shows the whole picture. Best at least 1200 pixels wide." onChange={cover => change({ cover })} onError={onError} /></div>
           </div>
           <Suspense fallback={<p className="cadmin-hint">Loading the editor…</p>}>
-            <RichEditor value={a.body} onChange={body => change({ body })} onError={onError} />
+            <RichEditor key={bodyKey} value={a.body} onChange={body => change({ body })} onError={onError} />
           </Suspense>
         </div>
       )}
@@ -441,13 +469,17 @@ function ArticlesAdmin({ role, onError, section = "media" }) {
 
 /* ── Pages (tiles and wording) ───────────────────────────────────────── */
 
-function FormField({ field, value, onChange, onError, id }) {
+function FormField({ field, value, onChange, onError, id, imageKey }) {
   if (field.type === "text") return <input id={id} value={value || ""} onChange={e => onChange(e.target.value)} />;
   if (field.type === "long") return <textarea id={id} rows="3" value={value || ""} onChange={e => onChange(e.target.value)} />;
   if (field.type === "switch") return (
     <label className="cadmin-switch"><input id={id} type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} /> <span>{value ? "On" : "Off"}</span></label>
   );
-  if (field.type === "image") return <ImageField value={value || ""} onChange={onChange} onError={onError} />;
+  if (field.type === "image") {
+    const key = imageKey || "";
+    const shapes = IMAGE_SHAPES[key] || IMAGE_SHAPES[key.replace(/\.\d+$/, "")] || [SHAPES.wide];
+    return <ImageField value={value || ""} onChange={onChange} onError={onError} shapes={shapes} fallback={BUILTIN_IMAGES[key] || ""} />;
+  }
   if (field.type === "lines") {
     const list = value || [];
     const update = (i, v) => onChange(list.map((x, j) => j === i ? v : x));
@@ -486,7 +518,7 @@ function FormField({ field, value, onChange, onError, id }) {
             {field.fields.map(f => (
               <div className="cadmin-field" key={f.key}>
                 <label htmlFor={id + "-" + i + "-" + f.key}>{f.label}</label>
-                <FormField field={f} id={id + "-" + i + "-" + f.key} value={item[f.key]} onChange={v => update(i, f.key, v)} onError={onError} />
+                <FormField field={f} id={id + "-" + i + "-" + f.key} value={item[f.key]} onChange={v => update(i, f.key, v)} onError={onError} imageKey={imageKey && f.type === "image" ? imageKey + "." + i : undefined} />
               </div>
             ))}
           </div>
@@ -510,6 +542,9 @@ function PageEditor({ pageKey, onError }) {
     return d ? { ...saved, ...d.data } : saved;
   });
   const [state, setState] = useState("clean"); // clean | dirty | saved | drafted
+  // Draft changes that arrive after the form opened are filled in.
+  const waitingAt = waiting && waiting.updatedAt;
+  useEffect(() => { if (waiting && state !== "dirty") setDraft(d => ({ ...d, ...waiting.data })); }, [waitingAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const edited = !!pages[pageKey];
 
   function save() {
@@ -548,7 +583,7 @@ function PageEditor({ pageKey, onError }) {
           {section.fields.map(f => (
             <div className="cadmin-field" key={f.key}>
               <label htmlFor={"pg-" + f.key}>{f.label}</label>
-              <FormField field={f} id={"pg-" + f.key} value={draft[f.key]} onError={onError}
+              <FormField field={f} id={"pg-" + f.key} value={draft[f.key]} onError={onError} imageKey={pageKey + "." + f.key}
                 onChange={v => { setDraft(d => ({ ...d, [f.key]: v })); setState("dirty"); }} />
             </div>
           ))}
@@ -852,18 +887,30 @@ function useHerbList() {
 
 function HerbPhotoRow({ herb, photo, onError }) {
   const ref = useRef(null);
+  const [framing, setFraming] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const parsed = photo ? parseImage(photo.image) : null;
+  async function saveFrame({ frame, rotatedFile }) {
+    setSaving(true);
+    try {
+      const src = rotatedFile ? await uploadSiteImage(rotatedFile, { maxSide: 1200, quality: 0.8, folder: "herbs" }) : parsed.src;
+      const result = setHerbPhoto(herb.name, buildImage(src, frame));
+      if (!result.ok) onError(result.error); else setFraming(false);
+    } catch (err) { onError(err.message); }
+    setSaving(false);
+  }
   async function pick(e) {
     const file = e.target.files && e.target.files[0];
     e.target.value = "";
     if (!file) return;
     try {
       const result = setHerbPhoto(herb.name, await uploadSiteImage(file, { maxSide: 1200, quality: 0.8, folder: "herbs" }));
-      if (!result.ok) onError(result.error);
+      if (!result.ok) onError(result.error); else setFraming(true);
     } catch (err) { onError(err.message); }
   }
   return (
     <div className="cadmin-item">
-      <div className="cadmin-thumb">{photo ? <img src={photo.image} alt="" /> : <span>No photo</span>}</div>
+      <div className="cadmin-thumb">{photo ? <FramePreview src={parsed.src} frame={parsed.frame} ratio={SHAPES.herb.ratio} /> : <span>No photo</span>}</div>
       <div className="cadmin-item-main">
         <p className="cadmin-item-title">{herb.name}</p>
         {herb.latinName && <p className="cadmin-item-meta"><em>{herb.latinName}</em></p>}
@@ -872,9 +919,14 @@ function HerbPhotoRow({ herb, photo, onError }) {
       <div className="cadmin-item-actions">
         <Link className="cadmin-btn" to={"/educate/hs/" + herb.slug}>View page</Link>
         <button type="button" className="cadmin-btn" onClick={() => ref.current.click()}>{photo ? "Change photo" : "Add photo"}</button>
+        {photo && <button type="button" className="cadmin-btn" onClick={() => setFraming(true)}>Frame photo</button>}
         {photo && <DeleteButton label="Remove" question="Remove this photo?" confirmLabel="Yes, remove" onDelete={() => removeHerbPhoto(herb.name)} />}
         <input ref={ref} type="file" accept="image/*" hidden onChange={pick} aria-label={"Photo for " + herb.name} />
       </div>
+      {framing && photo && (
+        <FrameEditor src={parsed.src} frame={parsed.frame} shapes={[SHAPES.herb]} busy={saving} title={"Frame the photo of " + herb.name}
+          onCancel={() => setFraming(false)} onSave={saveFrame} />
+      )}
     </div>
   );
 }

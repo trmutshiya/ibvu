@@ -1,3 +1,5 @@
+// IBVU v6.04 — what changed in this file: the "coming soon" picture is shown as framed in admin.
+//
 // IBVU v5.6 — what changed in this file since v5.5:
 // - The wording, the list of services and the "coming soon" tile now come from
 //   the editable page content (admin → Pages → Regulate). The built-in wording
@@ -11,6 +13,7 @@ import { usePageTitle, useSite } from '../lib/site.js';
 import { usePage } from '../lib/content.js';
 import advisoryImg from '../assets/regulate-advisory.jpg';
 import labImg from '../assets/regulate-lab.jpg';
+import Framed from './Framed.jsx';
 
 export default function Regulate() {
   usePageTitle("Regulate");
@@ -54,7 +57,7 @@ export default function Regulate() {
         {c.soonTitle && (
           <section className="soon-feature" aria-labelledby="soon-heading">
             <div className="soon-feature-image">
-              <img src={c.soonImage || labImg} alt="Laboratory flasks and beakers, two holding sprigs of green leaves" width="1080" height="720" loading="lazy" />
+              <Framed value={c.soonImage} fallback={labImg} alt="Laboratory flasks and beakers, two holding sprigs of green leaves" width="1080" height="720" loading="lazy" />
             </div>
             <div className="soon-feature-text">
               {c.soonLabel && <span className="shop-soon-label">{c.soonLabel}</span>}

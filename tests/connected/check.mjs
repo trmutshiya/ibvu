@@ -1,3 +1,6 @@
+// IBVU v6.05 — what changed in this file: the framing window is used with its buttons.
+// IBVU v6.04 — what changed in this file: the event picture is framed (zoom in) in
+// the framing window, and the framing is saved with it and shown to visitors.
 // IBVU v6.03 — what changed in this file: also checks newsletters (draft saves itself, test
 // email, send now, the sent record, scheduling in UK time and cancelling, the archive on the
 // site), the Reminders list and settings, and draft changes to a live blog post (by the Owner
@@ -149,14 +152,19 @@ export async function check() {
   await o.page.fill('#ev-time', '18:30');
   await o.page.fill('#ev-place', 'London');
   await o.page.locator('.cadmin-image input[type=file]').setInputFiles(join(root, 'src/assets/', 'shop-events.jpg'));
-  await o.page.waitForSelector('.cadmin-image img', { timeout: 10000 });
-  const evImg = await o.page.locator('.cadmin-image img').getAttribute('src');
+  await o.page.waitForSelector('.frame-dialog', { timeout: 10000 });
+  const evImg = await o.page.locator('.cadmin-image-preview img').getAttribute('src');
   ok('event image uploaded to the picture store', /\/storage\/v1\/object\/public\/site-images\/events\//.test(evImg), evImg.slice(0, 90));
+  await o.page.waitForSelector('.frame-dialog .frame-clip', { timeout: 10000 });
+  ok('the framing window opens after choosing a picture', await o.page.locator('.frame-dialog .frame-clip').count() === 1);
+  await o.page.click('.frame-dialog button:has-text("Larger +")');
+  await o.page.click('.frame-foot button:has-text("Save")');
+  await o.page.waitForSelector('.frame-dialog', { state: 'detached' });
   await o.page.click('.cadmin-card button:has-text("Publish")');
   await o.page.waitForTimeout(1200);
   d = await dbNow();
   const ev = d.site_events.find(e => e.title === 'Plant Science Evening');
-  ok('event saved as published', ev && ev.status === 'published' && ev.event_date === '2027-03-04' && ev.image === evImg);
+  ok('event saved as published, with its framing', ev && ev.status === 'published' && ev.event_date === '2027-03-04' && ev.image === evImg + '#frame=50,50,1.1', ev && ev.image);
   ok('history saved with the role, not an email', d.site_history.some(h => h.who === 'Owner' && h.title === 'Plant Science Evening') && !JSON.stringify(d.site_history).includes('@'));
 
   // blog post
@@ -322,6 +330,9 @@ export async function check() {
   await v2.page.goto(B + '/shop/events');
   await v2.page.waitForSelector('text=Plant Science Evening', { timeout: 10000 });
   ok('visitor sees the published event', true);
+  ok('…with its picture framed (zoomed in)', /scale\(1\.1\)/.test(await v2.page.locator('.event-tile .framed-move').getAttribute('style') || ''));
+  await v2.page.waitForFunction(() => { const i = document.querySelector('.event-tile .framed-move img'); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 10000 });
+  ok('…and the picture loads from the picture store', true);
   await v2.page.goto(B + '/educate/blog');
   await v2.page.waitForSelector('.media-tile-title:has-text("Why ginger warms you up")', { timeout: 10000 });
   ok('visitor sees the published blog post', true);
@@ -373,9 +384,13 @@ export async function check() {
   await o.page.click('.cadmin-item:has-text("Why ginger warms you up") button:has-text("Edit")');
   await o.page.waitForSelector('text=You are looking at draft changes');
   await o.page.click('button:has-text("Publish changes")');
-  await o.page.waitForTimeout(1200);
-  d = await dbNow();
-  ok('publishing draft changes updates the live post', d.site_articles.some(a => a.title === 'Why ginger warms you (new title)' && a.status === 'published') && !d.content_drafts.some(x => x.kind === 'article'));
+  for (let i = 0; i < 20; i++) { // wait for the save, up to 10 seconds
+    d = await dbNow();
+    if (d.site_articles.some(a => a.title === 'Why ginger warms you (new title)') && !d.content_drafts.some(x => x.kind === 'article')) break;
+    await o.page.waitForTimeout(500);
+  }
+  ok('publishing draft changes updates the live post', d.site_articles.some(a => a.title === 'Why ginger warms you (new title)' && a.status === 'published') && !d.content_drafts.some(x => x.kind === 'article'),
+    JSON.stringify({ titles: d.site_articles.map(a => a.title + ':' + a.status), drafts: d.content_drafts.map(x => x.kind + ':' + x.data.title), err: await o.page.locator('.cadmin-sync-error, .cadmin-problem').allInnerTexts() }));
 
   // 5. The Writer signs in
   const w = await newPage(browser);

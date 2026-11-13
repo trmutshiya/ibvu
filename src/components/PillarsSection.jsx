@@ -1,3 +1,6 @@
+// IBVU v6.04 — what changed in this file: card photos are shown as framed in
+// admin (moved, zoomed, fitted), including the built-in photos.
+//
 // IBVU v5.9 — what changed in this file since v5.6:
 // - The introduction and the three cards' wording (and, optionally, their
 //   photos) now come from admin → Pages → Home. Until someone edits them the
@@ -9,6 +12,8 @@ import educateImg from '../assets/pillar-educate.jpg';
 import innovateImg from '../assets/pillar-innovate.jpg';
 import { usePage } from '../lib/content.js';
 import Emph from './Emph.jsx';
+import Framed from './Framed.jsx';
+import { parseImage } from '../lib/frame.js';
 
 // The fixed part of each card, in the same order as the wording in admin.
 const CARDS = [
@@ -19,7 +24,10 @@ const CARDS = [
 
 export default function PillarsSection({ onEducation }) {
   const c = usePage("home");
-  const pillars = CARDS.map((card, i) => ({ ...card, ...(c.pillars[i] || {}), image: (c.pillars[i] && c.pillars[i].image) || card.image, custom: !!(c.pillars[i] && c.pillars[i].image) }));
+  const pillars = CARDS.map((card, i) => {
+    const value = (c.pillars[i] && c.pillars[i].image) || "";
+    return { ...card, ...(c.pillars[i] || {}), image: value, fallback: card.image, custom: !!parseImage(value).src };
+  });
 
   return (
     <section className="pillars-section" id="pillars">
@@ -33,7 +41,7 @@ export default function PillarsSection({ onEducation }) {
         {pillars.map(p => (
           <article className="pillar-card" id={"pillar-" + p.id} key={p.id}>
             <div className="pillar-image">
-              <img src={p.image} alt={p.custom ? "" : p.alt} width="900" height="600" loading="lazy" />
+              <Framed value={p.image} fallback={p.fallback} alt={p.custom ? "" : p.alt} width="900" height="600" loading="lazy" />
             </div>
             <div className="pillar-text">
               <h2 className="pillar-title">{p.title}</h2>

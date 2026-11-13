@@ -1,3 +1,5 @@
+// IBVU v6.04 — what changed in this file: the herb photo is shown as framed in admin → Herb photos.
+//
 // IBVU v5.92 — what changed in this file: the share link uses the herb's own address (herb.slug).
 //
 // IBVU v5.9 — what changed in this file: the line under a herb photo now comes from admin → Pages → Herbarium (same wording as before until edited).
@@ -6,6 +8,7 @@
 // there is one, is shown under the heading with a small "educational purposes"
 // line beneath it. Share buttons (LinkedIn, WhatsApp, copy link) sit at the
 // foot of the herb's page. Nothing else changed.
+import Framed from './Framed.jsx';
 import ScientificSection from './ScientificSection.jsx';
 import { useHerbPhoto, herbKey, usePage } from '../lib/content.js';
 import { ShareButtons } from './Share.jsx';
@@ -28,7 +31,7 @@ export default function HerbProfile({ herb, conditionId, onBack }) {
       </div>
       {photo && (
         <figure className="herb-photo">
-          <img src={photo} alt={"Photo of " + herb.name} />
+          <Framed value={photo} ratio="3/2" alt={"Photo of " + herb.name} />
           {words.photoCaption && <figcaption>{words.photoCaption}</figcaption>}
         </figure>
       )}
