@@ -1,3 +1,7 @@
+// IBVU v6.12 — what changed in this file: also checks the security fix: a visitor cannot
+// read submissions, read herbs' private columns, add herbs or use the approval email; the
+// Owner reviews and publishes a submitted herb while signed in, and the edit log keeps the
+// role, never an email address; visitors read published herbs' public columns only.
 // IBVU v6.11 — what changed in this file: also checks the review step: a Writer sends an
 // article for review (it is saved first, the Owner is emailed, the database refuses the
 // Writer's changes while it waits), the Owner comments and sends it back (the Writer is
@@ -213,6 +217,34 @@ export async function check() {
   ok('photo approved and moved to the public store', approved && /site-images\/herbs\//.test(approved.image_path));
   ok('private copy removed', !(await (await fetch(M + '/__db')).json()).store.some(k => k.startsWith('herb-photo-submissions/')));
 
+  // v6.12: the security fix
+  const anonH = { apikey: 'anon-test-key', Authorization: 'Bearer anon-test-key', 'Content-Type': 'application/json' };
+  ok('a visitor cannot read submissions', (await fetch(M + '/rest/v1/submissions?select=*', { headers: anonH })).status === 401);
+  ok('a visitor cannot read herbs\' private columns', (await fetch(M + '/rest/v1/approved_herbs?select=*', { headers: anonH })).status === 401);
+  ok('a visitor cannot add a published herb', (await fetch(M + '/rest/v1/approved_herbs', { method: 'POST', headers: anonH, body: JSON.stringify({ name: 'Fake herb' }) })).status >= 400);
+  ok('a visitor cannot change a submission', (await fetch(M + '/rest/v1/submissions?common_name=eq.Ginger', { method: 'PATCH', headers: anonH, body: JSON.stringify({ review_status: 'approved' }) })).status >= 400);
+  ok('a visitor cannot use the approval email', (await fetch(M + '/functions/v1/send-approval-email', { method: 'POST', headers: anonH, body: JSON.stringify({ to: 'someone@example.org', herbName: 'x' }) })).status === 403);
+  ok('a visitor cannot use the description writer', (await fetch(M + '/functions/v1/generate-description', { method: 'POST', headers: anonH, body: JSON.stringify({ herbName: 'x' }) })).status === 403);
+  await o.page.goto(B + '/admin/herbreview');
+  await o.page.waitForSelector('tr:has-text("Ginger") button:has-text("Approve")', { timeout: 15000 });
+  ok('Owner sees the submission (read while signed in)', true);
+  await o.page.click('tr:has-text("Ginger") button:has-text("Approve")');
+  await o.page.waitForSelector('button:has-text("Publish to Herbarium")', { timeout: 40000 });
+  await o.page.click('button:has-text("Publish to Herbarium")');
+  for (let i = 0; i < 20; i++) { d = await dbNow(); if (d.approved_herbs.some(h => h.name === 'Ginger') && d.herb_edits.some(e => e.herb_name === 'Ginger')) break; await o.page.waitForTimeout(300); }
+  ok('Owner published the herb while signed in', d.approved_herbs.some(h => h.name === 'Ginger' && h.description === 'A test description.'), JSON.stringify(d.approved_herbs.map(h => h.name)));
+  ok('the submission is marked approved', (d.submissions.find(s => s.common_name === 'Ginger') || {}).review_status === 'approved');
+  ok('the edit log keeps the role, never an email address', d.herb_edits.some(e => e.herb_name === 'Ginger' && e.changed_by === 'Owner') && !JSON.stringify(d.herb_edits).includes('@'), JSON.stringify(d.herb_edits));
+  const pub = await fetch(M + '/rest/v1/approved_herbs?select=id,created_at,name,latin,category,origin,description,uses,conditions,color,pubmed_count,other_names', { headers: anonH });
+  const pubRows = pub.ok ? await pub.json() : [];
+  ok('visitors read published herbs (public columns only)', pubRows.some(h => h.name === 'Ginger') && !pubRows.some(h => 'submitter_email' in h));
+  const logFrom = (await (await fetch(M + '/__log')).json()).length;
+  await v.page.goto(B + '/educate/hs');
+  await v.page.waitForSelector('.herb-card', { timeout: 15000 });
+  const herbReads = (await (await fetch(M + '/__log')).json()).slice(logFrom).filter(l => l.path.startsWith('/rest/v1/approved_herbs') && l.who === 'anon' && l.method === 'GET');
+  ok('the Herbarium asks only for public columns', herbReads.length > 0 && herbReads.every(l => /select=id,created_at,name/.test(l.path)), herbReads.map(l => l.path.slice(0, 60)).join(' | '));
+  ok('Owner errors on pages (herb review)', o.page.errors.length === 0, o.page.errors.join(' | '));
+
   // add a Writer
   await o.page.goto(B + '/admin/people');
   await o.page.fill('#pe-email', 'writer@example.org');
@@ -364,8 +396,13 @@ export async function check() {
   await v2.page.waitForFunction(() => { const i = document.querySelector('.herb-thumb img'); return i && i.complete; }, null, { timeout: 10000 });
   ok('visitor sees the approved herb photo as a tile beside the name', await v2.page.locator('.herb-thumb img').evaluate(i => i.naturalWidth > 0), await v2.page.locator('.herb-thumb img').getAttribute('src'));
   await v2.page.goto(B + '/educate/hs');
+  // the published copy of Ginger (from the herb review check) is listed last, so search for it
+  await v2.page.waitForSelector('.herb-card', { timeout: 10000 });
+  await v2.page.locator('.search-wrap input, input[type="search"], input[placeholder*="earch"]').first().fill('Ginger');
   await v2.page.waitForSelector('.herb-card.has-photo .herb-card-thumb img', { timeout: 10000 });
-  ok('…and as a small tile on its card in the Herbarium list', await v2.page.locator('.herb-card.has-photo').count() === 1);
+  // (Ginger is now in the list twice: the built-in herb and the copy published in the herb review check)
+  const photoCards = await v2.page.locator('.herb-card.has-photo').evaluateAll(cards => cards.map(c => (c.querySelector('h3') || {}).textContent || ''));
+  ok('…and as a small tile on its card in the Herbarium list', photoCards.length >= 1 && photoCards.every(n => n.trim().toLowerCase() === 'ginger'), 'cards: ' + JSON.stringify(photoCards));
   ok('no "Edit this page" for visitors', await v2.page.locator('.edit-page').count() === 0);
   ok('visitor drafts hidden', !(await v2.page.content()).includes('FAIL-ME'));
   await v2.page.goto(B + '/media/does-not-exist');

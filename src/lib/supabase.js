@@ -1,3 +1,13 @@
+// IBVU v6.12 — what changed in this file (security fix, with database step 4):
+// - Herb review now writes and reads as the signed-in person, not with the site's public
+//   key: submissions, approving and publishing herbs, editing, unpublishing and the edit
+//   log (staffFetch). The database only lets herb reviewers (Owners, or people with the
+//   herb review tick) do these, so the public key can no longer change herbs or read
+//   submitters' email addresses.
+// - The public Herbarium asks only for the columns it shows (PUBLIC_HERB_COLUMNS), never
+//   the submitter's email or who edited it.
+// - The edit log never stores a submitter's email address.
+//
 // ── Supabase config ───────────────────────────────────────────────────────
 export const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL;
 export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -5,8 +15,24 @@ export const SUPABASE_READY    = SUPABASE_URL && !SUPABASE_URL.startsWith("https
 
 export const SUBMISSIONS_KEY = "ibvu_submissions"; // localStorage fallback key
 
+// v6.12: the signed-in person's own key (herb reviewers), for everything private.
+async function staffHeaders(extra = {}) {
+  const { getClient } = await import('./remote.js');
+  const client = await getClient();
+  const { data } = await client.auth.getSession();
+  const token = data && data.session && data.session.access_token;
+  if (!token) throw new Error("Please sign in again (your admin sign-in has ended).");
+  return { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + token, ...extra };
+}
+function staffFetch(path, init = {}) {
+  return staffHeaders(init.headers || {}).then(headers => fetch(SUPABASE_URL + "/rest/v1/" + path, { ...init, headers }));
+}
+// What the public Herbarium may read about a published herb.
+export const PUBLIC_HERB_COLUMNS = "id,created_at,name,latin,category,origin,description,uses,conditions,color,pubmed_count,other_names";
+
 // ── Paginated fetch — retrieves ALL rows regardless of table size ──────────
-export async function sbFetchAll(table, query) {
+// asStaff: read as the signed-in herb reviewer (private columns and tables).
+export async function sbFetchAll(table, query, asStaff = false) {
   const PAGE = 100;
   let offset = 0;
   let all = [];
@@ -14,7 +40,7 @@ export async function sbFetchAll(table, query) {
     const url = SUPABASE_URL + "/rest/v1/" + table + "?" + query +
                 "&limit=" + PAGE + "&offset=" + offset;
     const res = await fetch(url, {
-      headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY },
+      headers: asStaff ? await staffHeaders() : { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY },
     });
     if (!res.ok) throw new Error("Supabase fetch failed: " + res.status);
     const rows = await res.json();
@@ -49,7 +75,7 @@ export async function sbInsert(entry) {
 }
 
 export async function sbFetch() {
-  const rows = await sbFetchAll("submissions", "order=created_at.desc");
+  const rows = await sbFetchAll("submissions", "order=created_at.desc", true);
   return rows.map(function(r) {
     return {
       id:            r.id,
@@ -68,14 +94,9 @@ export async function sbFetch() {
 }
 
 export async function sbPublish(herbData) {
-  const res = await fetch(SUPABASE_URL + "/rest/v1/approved_herbs", {
+  const res = await staffFetch("approved_herbs", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "apikey": SUPABASE_ANON_KEY,
-      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-      "Prefer": "return=minimal",
-    },
+    headers: { "Content-Type": "application/json", "Prefer": "return=minimal" },
     body: JSON.stringify({
       submission_id:      herbData.submission_id,
       name:               herbData.name,
@@ -98,7 +119,7 @@ export async function sbPublish(herbData) {
 export async function sbFetchApprovedFull() {
   if (!SUPABASE_READY) return [];
   try {
-    return await sbFetchAll("approved_herbs", "order=created_at.desc");
+    return await sbFetchAll("approved_herbs", "order=created_at.desc", true);
   } catch { return []; }
 }
 
@@ -106,14 +127,9 @@ export async function sbUpdateHerb(id, updates, changedBy) {
   // approved_herbs has no other_names column — strip it before patching
   const { other_names, ...rest } = updates;
   const payload = { ...rest, updated_at: new Date().toISOString(), updated_by: changedBy || null };
-  const res = await fetch(SUPABASE_URL + "/rest/v1/approved_herbs?id=eq." + id, {
+  const res = await staffFetch("approved_herbs?id=eq." + id, {
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      "apikey": SUPABASE_ANON_KEY,
-      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-      "Prefer": "return=minimal",
-    },
+    headers: { "Content-Type": "application/json", "Prefer": "return=minimal" },
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error("Update failed: " + res.status);
@@ -121,23 +137,18 @@ export async function sbUpdateHerb(id, updates, changedBy) {
 }
 
 export async function sbUpdateReviewStatus(submissionId, status) {
-  const res = await fetch(SUPABASE_URL + "/rest/v1/submissions?id=eq." + submissionId, {
+  const res = await staffFetch("submissions?id=eq." + submissionId, {
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      "apikey": SUPABASE_ANON_KEY,
-      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-      "Prefer": "return=minimal",
-    },
+    headers: { "Content-Type": "application/json", "Prefer": "return=minimal" },
     body: JSON.stringify({ review_status: status }),
   });
   if (!res.ok) throw new Error("Status update failed: " + res.status);
 }
 
 export async function sbMarkEmailed(id) {
-  const res = await fetch(SUPABASE_URL + "/rest/v1/approved_herbs?id=eq." + id, {
+  const res = await staffFetch("approved_herbs?id=eq." + id, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY, "Prefer": "return=minimal" },
+    headers: { "Content-Type": "application/json", "Prefer": "return=minimal" },
     body: JSON.stringify({ emailed: true }),
   });
   if (!res.ok) throw new Error("sbMarkEmailed failed " + res.status);
@@ -147,43 +158,35 @@ export async function sbMarkEmailed(id) {
 export async function sbLogHerbEdit(herbId, herbName, action, changedBy, newValues) {
   if (!SUPABASE_READY) return;
   try {
-    await fetch(SUPABASE_URL + "/rest/v1/herb_edits", {
+    // never keep a submitter's email address in the log
+    const { submitter_email, ...values } = newValues || {}; // eslint-disable-line no-unused-vars
+    await staffFetch("herb_edits", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "apikey": SUPABASE_ANON_KEY,
-        "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-        "Prefer": "return=minimal",
-      },
+      headers: { "Content-Type": "application/json", "Prefer": "return=minimal" },
       body: JSON.stringify({
         herb_id:    herbId    || null,
         herb_name:  herbName  || "unknown",
         action:     action    || "edit",
         changed_by: changedBy || null,
-        new_values: newValues || null,
+        new_values: newValues ? values : null,
       }),
     });
   } catch (e) { console.warn("Audit log failed (non-fatal):", e); }
 }
 
 export async function sbUnpublishHerb(id, herbName, changedBy) {
-  const res = await fetch(SUPABASE_URL + "/rest/v1/approved_herbs?id=eq." + id, {
+  const res = await staffFetch("approved_herbs?id=eq." + id, {
     method: "DELETE",
-    headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY, "Prefer": "return=minimal" },
+    headers: { "Prefer": "return=minimal" },
   });
   if (!res.ok) throw new Error("Unpublish failed: " + res.status);
   sbLogHerbEdit(id, herbName || "unknown", "unpublish", changedBy, null);
 }
 
 export async function sbInsertStaticHerb(herbData, changedBy) {
-  const res = await fetch(SUPABASE_URL + "/rest/v1/approved_herbs", {
+  const res = await staffFetch("approved_herbs", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "apikey": SUPABASE_ANON_KEY,
-      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-      "Prefer": "return=representation",
-    },
+    headers: { "Content-Type": "application/json", "Prefer": "return=representation" },
     body: JSON.stringify({
       name:        herbData.name,
       latin:       herbData.latin,
@@ -207,7 +210,7 @@ export async function sbInsertStaticHerb(herbData, changedBy) {
 export async function sbFetchApproved() {
   if (!SUPABASE_READY) return [];
   try {
-    const rows = await sbFetchAll("approved_herbs", "order=created_at.asc");
+    const rows = await sbFetchAll("approved_herbs", "select=" + PUBLIC_HERB_COLUMNS + "&order=created_at.asc");
     return rows.map(function(r, i) {
       return {
         id:          2000 + i,

@@ -1,3 +1,7 @@
+// IBVU v6.12 — what changed in this file (security fix): "Send Email" asks the server to
+// send the approval email for that herb (the server checks consent and marks it sent), so
+// the browser no longer marks it sent first or passes an email address.
+//
 // IBVU v5.9 — what changed in this file since v5.7:
 // - This screen no longer has its own sign-in. The one admin sign-in at
 //   ibvu.org/admin now comes first (see src/lib/auth.js), so the email and
@@ -13,7 +17,7 @@ import { HERBS_FALLBACK } from '../constants/herbs.js';
 import {
   SUPABASE_READY, SUBMISSIONS_KEY,
   sbFetch, sbFetchApprovedFull, sbFetchStaticHerbs,
-  sbUpdateReviewStatus, sbMarkEmailed, sbUnpublishHerb,
+  sbUpdateReviewStatus, sbUnpublishHerb,
 } from '../lib/supabase.js';
 import { gbifEnrich, sendApprovalEmail } from '../lib/edge.js';
 import CompletionPanel from './CompletionPanel.jsx';
@@ -244,9 +248,8 @@ export default function AdminPanel({ onBack, adminLabel = "Admin" }) {
                                   if (!window.confirm("Send approval email to " + h.submitter_email + "?")) return;
                                   setSendingEmailIds(prev => { const s = new Set(prev); s.add(h.id); return s; });
                                   try {
-                                    await sbMarkEmailed(h.id);
+                                    await sendApprovalEmail(h.id);
                                     setApprovedHerbsList(prev => prev.map(x => x.id === h.id ? { ...x, emailed: true } : x));
-                                    await sendApprovalEmail(h.submitter_email, h.name);
                                   } catch (err) {
                                     alert("Email failed: " + err.message);
                                   } finally {

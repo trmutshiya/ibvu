@@ -1,3 +1,8 @@
+// IBVU v6.12 — what changed in this file (security fix): the approval email and the
+// description writer are only for signed-in herb reviewers. sendApprovalEmail now sends the
+// herb's id (the server looks up the submitter's address and consent itself, and marks it
+// emailed), and both calls go with the signed-in person's own key.
+//
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase.js';
 import { CONDITION_GROUPS, CONDITION_SEARCH_TERMS } from '../constants/conditions.js';
 
@@ -97,16 +102,22 @@ export async function gbifEnrich(commonName) {
   } catch { return { latin: null, otherNames: [], loading: false }; }
 }
 
+// v6.12: the signed-in person's key, for admin-only functions.
+async function signedInHeaders() {
+  const { getClient } = await import('./remote.js');
+  const client = await getClient();
+  const { data } = await client.auth.getSession();
+  const token = data && data.session && data.session.access_token;
+  if (!token) throw new Error("Please sign in again (your admin sign-in has ended).");
+  return { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + token };
+}
+
 // ── Claude description generator ──────────────────────────────────────────
 export async function generateDescription(herbName, latinName, uses, origin, paperCount) {
   try {
     const res = await fetch(EDGE_DESCRIBE_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "apikey": SUPABASE_ANON_KEY,
-        "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-      },
+      headers: await signedInHeaders(),
       body: JSON.stringify({ herbName, latinName, uses, origin, paperCount }),
     });
     if (!res.ok) return "";
@@ -137,11 +148,13 @@ export async function runConditionScreens(herbName, otherNames) {
 }
 
 // ── Approval email ────────────────────────────────────────────────────────
-export async function sendApprovalEmail(toEmail, herbName) {
+// herbId: the published herb (approved_herbs.id). The server checks the submitter agreed
+// to be contacted and that no email was sent yet, sends it and marks the herb emailed.
+export async function sendApprovalEmail(herbId) {
   const res = await fetch(EDGE_EMAIL_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY },
-    body: JSON.stringify({ to: toEmail, herbName }),
+    headers: await signedInHeaders(),
+    body: JSON.stringify({ herbId }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

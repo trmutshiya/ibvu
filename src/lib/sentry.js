@@ -1,3 +1,4 @@
+// IBVU v6.12 — what changed in this file: the release label sent with error reports now says 6.0.12.
 // IBVU v6.11 — what changed in this file: the release label sent with error reports now says 6.0.11.
 // IBVU v6.10 — what changed in this file: the release label sent with error reports now says 6.0.10.
 // IBVU v6.09 — what changed in this file: the release label sent with error reports now says 6.0.9.
@@ -18,7 +19,7 @@ export function initSentry() {
     dsn,
     environment: import.meta.env.DEV ? "development" : "production",
     tracesSampleRate: 0.1,
-    release: "ibvu@6.0.11",
+    release: "ibvu@6.0.12",
     beforeSend(event) {
       if (import.meta.env.DEV) return null;
       return event;

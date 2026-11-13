@@ -1,3 +1,8 @@
+// IBVU v6.12 — what changed in this file: the old herb tables follow the new rules
+// (database step 4): only herb reviewers read submissions and the edit log and change
+// published herbs; visitors may only send a submission and read the public columns of
+// published herbs. Stand-ins for send-approval-email and generate-description that only
+// herb reviewers may use.
 // IBVU v6.11 — what changed in this file: the review tables (article_reviews,
 // article_comments), their two read functions, a stand-in article-review function (same
 // rules and emails as the real one) and the rule that a Writer cannot change an article
@@ -85,6 +90,7 @@ function visible(table, rows, who) {
     case 'newsletter_sends': case 'admin_reminder_recipients': case 'newsletter_reminder_settings': return who.role === 'owner' ? rows : null;
     case 'content_drafts': return staff ? rows : null;
     case 'article_reviews': case 'article_comments': return null;   // only through the functions
+    case 'submissions': case 'herb_edits': return who.review ? rows : null;   // v6.12
     default: return rows;
   }
 }
@@ -326,6 +332,17 @@ http.createServer(async (req, res) => {
       comments: db.article_comments.filter(c => c.article_id === article.id).map(c => ({ id: c.id, article_id: c.article_id, parent_id: c.parent_id, author_role: c.author_role, quote: c.quote, mark_id: c.mark_id, body: c.body, resolved: c.resolved, created_at: c.created_at, mine: c.author_email === who.email })),
     });
   }
+  if (p === '/functions/v1/send-approval-email' || p === '/functions/v1/generate-description') {
+    if (!who.review) return send(res, 403, { error: 'Only signed-in herb reviewers can use this.' });
+    if (p.endsWith('generate-description')) return send(res, 200, { description: 'A test description.' });
+    const h = db.approved_herbs.find(x => x.id === (json && json.herbId));
+    if (!h) return send(res, 404, { error: 'Herb not found.' });
+    if (!h.submitter_consent || !h.submitter_email) return send(res, 400, { error: 'The submitter did not agree to be contacted.' });
+    if (h.emailed) return send(res, 409, { error: 'The email was already sent.' });
+    emails.push({ to: h.submitter_email, subject: 'Your herb submission has been approved — IBVU Herbarium Scientifica' });
+    h.emailed = true;
+    return send(res, 200, { ok: true });
+  }
   if (p === '/functions/v1/admin-add-person') {
     if (who.role !== 'owner') return send(res, 403, { ok: false, error: 'Only an Owner can add people.' });
     const email = (json.email || '').toLowerCase();
@@ -379,14 +396,24 @@ http.createServer(async (req, res) => {
     if (!db[table]) return send(res, 404, { message: 'no table' });
     const all = db[table];
     const seen = visible(table, all, who);
-    if (seen === null) return send(res, 401, { code: '42501', message: 'permission denied for table ' + table });
+    if (seen === null && !(table === 'submissions' && req.method === 'POST')) return send(res, 401, { code: '42501', message: 'permission denied for table ' + table });
     const prefer = req.headers.prefer || '';
     const wantsObject = (req.headers.accept || '').includes('vnd.pgrst.object');
     const returnRows = rows => {
       if (wantsObject) { if (rows.length !== 1) return send(res, 406, { code: 'PGRST116', message: 'JSON object requested, multiple (or no) rows returned' }); return send(res, 200, rows[0]); }
       return prefer.includes('return=representation') || req.method === 'GET' ? send(res, req.method === 'POST' ? 201 : 200, rows) : (res.writeHead(req.method === 'POST' ? 201 : 204), res.end());
     };
+    // v6.12: visitors may only read these columns of published herbs
+    const PUBLIC_HERB = ['id', 'created_at', 'name', 'latin', 'category', 'origin', 'description', 'uses', 'conditions', 'color', 'pubmed_count', 'other_names'];
+    if (table === 'approved_herbs' && !who.review && (req.method === 'GET' || req.method === 'HEAD')) {
+      const cols = (url.searchParams.get('select') || '*').split(',');
+      if (cols.some(c => !PUBLIC_HERB.includes(c))) return send(res, 401, { code: '42501', message: 'permission denied for table approved_herbs' });
+      return returnRows(filterRows(seen, url.searchParams).map(r => Object.fromEntries(cols.map(c => [c, r[c]]))));
+    }
     if (req.method === 'GET' || req.method === 'HEAD') return returnRows(filterRows(seen, url.searchParams));
+    if (['approved_herbs', 'herb_edits'].includes(table) && !who.review) return send(res, 401, { code: '42501', message: 'new row violates row-level security policy for table "' + table + '"' });
+    if (table === 'submissions' && req.method !== 'POST' && !who.review) return send(res, 401, { code: '42501', message: 'permission denied for table submissions' });
+    if (table === 'submissions' && req.method === 'POST' && (Array.isArray(json) ? json : [json]).some(r => r && r.review_status && r.review_status !== 'pending')) return send(res, 403, { code: '42501', message: 'new row violates row-level security policy for table "submissions"' });
     const isStaffTable = ['site_events', 'site_articles', 'site_pages', 'site_history', 'herb_photos', 'site_people', 'content_drafts'].includes(table);
     if (isStaffTable && !who.role) return send(res, 401, { code: '42501', message: 'new row violates row-level security policy for table "' + table + '"' });
     if (table === 'site_people' && who.role !== 'owner') return send(res, 403, { code: '42501', message: 'new row violates row-level security policy' });
