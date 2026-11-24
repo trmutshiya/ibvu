@@ -1,3 +1,10 @@
+// IBVU v6.13 — what changed in this file (Other names fix, no database change):
+// - Editing a herb in Herb review now saves "Other names". sbUpdateHerb used to strip
+//   other_names before saving (left over from when approved_herbs had no such column),
+//   so the edit log recorded the names but the live herb page never showed them.
+// - Approving a submission now copies its other names onto the published herb (sbPublish
+//   left the field out).
+//
 // IBVU v6.12 — what changed in this file (security fix, with database step 4):
 // - Herb review now writes and reads as the signed-in person, not with the site's public
 //   key: submissions, approving and publishing herbs, editing, unpublishing and the edit
@@ -104,6 +111,7 @@ export async function sbPublish(herbData) {
       category:           herbData.category,
       origin:             herbData.origin,
       description:        herbData.description,
+      other_names:        herbData.other_names || null,
       uses:               herbData.uses,
       conditions:         herbData.conditions,
       color:              herbData.color,
@@ -124,9 +132,7 @@ export async function sbFetchApprovedFull() {
 }
 
 export async function sbUpdateHerb(id, updates, changedBy) {
-  // approved_herbs has no other_names column — strip it before patching
-  const { other_names, ...rest } = updates;
-  const payload = { ...rest, updated_at: new Date().toISOString(), updated_by: changedBy || null };
+  const payload = { ...updates, updated_at: new Date().toISOString(), updated_by: changedBy || null };
   const res = await staffFetch("approved_herbs?id=eq." + id, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", "Prefer": "return=minimal" },
