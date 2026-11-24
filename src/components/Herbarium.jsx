@@ -1,3 +1,7 @@
+// IBVU v6.15 — what changed in this file: merged herbs (Admin → Duplicates) are left out of
+// the Herbarium, and the old address of a merged herb forwards to the herb it was merged
+// into. The submission form gets the herb list, to ask "Is it one of these?".
+//
 // IBVU v6.06 — what changed in this file: the herb page gets the whole herb list, for
 // its Related herbs.
 //
@@ -16,7 +20,7 @@ import { useState, useEffect } from 'react';
 import { Link, useParams, useLocation, useNavigate } from 'react-router-dom';
 import { HERBS_FALLBACK } from '../constants/herbs.js';
 import { CONDITION_GROUPS } from '../constants/conditions.js';
-import { sbFetchApproved, sbFetchStaticHerbs } from '../lib/supabase.js';
+import { sbFetchApproved, sbFetchStaticHerbs, sbFetchHerbMerges } from '../lib/supabase.js';
 import ConditionSidebar from './ConditionSidebar.jsx';
 import HerbCard from './HerbCard.jsx';
 import HerbProfile from './HerbProfile.jsx';
@@ -26,7 +30,7 @@ import SiteHeader from './SiteHeader.jsx';
 import SiteFooter from './SiteFooter.jsx';
 import { usePageTitle } from '../lib/site.js';
 import { usePage } from '../lib/content.js';
-import { mergeHerbs } from '../lib/herbs.js';
+import { mergeHerbs, herbForwards } from '../lib/herbs.js';
 
 const HERBS_PER_PAGE = 24;
 
@@ -48,19 +52,27 @@ export default function Herbarium() {
   const [activeCondition, setActiveCondition] = useState(null);
   const [sortMode, setSortMode]               = useState("default");
   const [herbPage, setHerbPage]               = useState(1);
+  const [merges, setMerges]                   = useState([]);
 
   useEffect(function() {
     Promise.all([
       sbFetchApproved().then(rows => setApprovedHerbs(rows)),
       sbFetchStaticHerbs().then(rows => { if (rows.length > 0) setStaticHerbs(rows); }),
+      sbFetchHerbMerges().then(rows => setMerges(rows)),
     ]).finally(() => setLoaded(true));
   }, []);
 
   // Built-in herbs plus approved ones, each with its own address (herb.slug).
-  const herbs = mergeHerbs(staticHerbs, approvedHerbs);
+  const herbs = mergeHerbs(staticHerbs, approvedHerbs, merges);
 
   // The herb whose page is open (if any), found by its address.
   const selected = herbSlug ? herbs.find(h => h.slug === herbSlug) : null;
+
+  // A merged herb's old address forwards to the herb it was merged into.
+  const forwardTo = loaded && herbSlug && !selected ? herbForwards(staticHerbs, approvedHerbs, merges)[herbSlug] : null;
+  useEffect(function() {
+    if (forwardTo) navigate("/educate/hs/" + forwardTo, { replace: true });
+  }, [forwardTo]); // eslint-disable-line react-hooks/exhaustive-deps
   const selectedCondition = (location.state && location.state.condition) || null;
   usePageTitle(
     selected ? selected.name : tab === "submit" ? "Submit an herb" : "Herbarium Scientifica",
@@ -199,7 +211,7 @@ export default function Herbarium() {
           </div>
         ) : (
           <ErrorBoundary>
-            <SubmitForm />
+            <SubmitForm herbs={herbs} />
           </ErrorBoundary>
         )}
 

@@ -1732,3 +1732,48 @@ button.rv-quote:hover { color: var(--bark); text-decoration: underline; }
   .rv-layout { grid-template-columns: 1fr; }
   .rv-side { position: static; max-height: none; }
 }
+
+/* ── v6.15: "Is it one of these?" on the submission form ─────────────── */
+.match-step > p { color: var(--muted); font-style: italic; margin-bottom: 20px; font-size: 1rem; }
+.match-herb { display: flex; gap: 18px; align-items: center; justify-content: space-between; flex-wrap: wrap; border: 2px solid var(--sage-light); background: #fbfdf9; border-radius: 3px; padding: 16px 18px; margin: 0 0 12px; }
+.match-herb-text { flex: 1 1 260px; min-width: 0; }
+.match-herb h3 { font-family: 'Playfair Display', serif; font-size: 1.3rem; color: var(--bark); margin: 0; }
+.match-latin { font-style: italic; color: var(--muted); margin: 2px 0 0; }
+.match-why { font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.5px; color: var(--sage); margin: 6px 0 4px; line-height: 1.6; }
+.match-open { font-size: 0.95rem; color: var(--sage); }
+.match-yes { white-space: normal; }
+.match-actions { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; margin-top: 18px; }
+.match-no, .match-back { background: none; border: 1px solid var(--sage); color: var(--sage); border-radius: 2px; padding: 11px 16px; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 1px; cursor: pointer; text-align: left; }
+.match-back { border: none; padding: 11px 0; color: var(--muted); }
+.match-no:hover, .match-back:hover { color: var(--bark); border-color: var(--bark); }
+.match-label { font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin: 18px 0 8px; }
+.match-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.match-chip { display: inline-block; background: var(--sage-pale); color: var(--bark); border-radius: 14px; padding: 3px 11px; font-size: 0.92rem; }
+.match-none { color: var(--muted); font-style: italic; margin: 10px 0; }
+.match-picks { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.match-pick { display: flex; gap: 10px; align-items: center; font-size: 1rem; color: var(--bark); cursor: pointer; }
+.match-pick input { width: 18px; height: 18px; accent-color: var(--sage); }
+.match-error { font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 1px; color: #c62828; margin: 10px 0; }
+@media (max-width: 600px) { .match-herb { flex-direction: column; align-items: stretch; } .match-yes { width: 100%; } }
+
+/* ── v6.15: duplicates in herb review and Admin → Duplicates ─────────── */
+.dupe-badge { display: inline-block; margin: 4px 0 0; padding: 2px 8px; border-radius: 3px; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; }
+.dupe-badge.certain { background: var(--sage); color: #fff; }
+.dupe-badge.likely { background: var(--gold); color: var(--bark); }
+.dupe-badge.possible { background: var(--cream-dark); color: var(--bark-light); }
+.dupe-badge.adds { background: #e3f2fd; color: #1565c0; }
+.dupe-why { display: block; font-size: 0.78rem; color: var(--muted); margin-top: 3px; max-width: 260px; }
+.cmp-grid { display: grid; grid-template-columns: 150px 1fr 1fr; border: 1px solid var(--cream-dark); border-radius: 3px; overflow: hidden; background: #fff; margin: 12px 0; }
+.cmp-grid > div { padding: 10px 12px; border-bottom: 1px solid var(--cream-dark); min-width: 0; overflow-wrap: anywhere; }
+.cmp-grid .cmp-h { background: var(--cream-dark); font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--bark-light); }
+.cmp-grid .cmp-f { font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.cmp-grid label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.cmp-grid input[type=radio], .cmp-grid input[type=checkbox] { margin-top: 4px; accent-color: var(--sage); flex: none; }
+.cmp-chip { display: inline-block; background: var(--sage-pale); border-radius: 12px; padding: 1px 9px; margin: 2px 4px 2px 0; font-size: 0.88rem; }
+.cmp-chip.new { background: #fff3cf; border: 1px dashed var(--gold); }
+.cmp-note { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); letter-spacing: 0.5px; display: block; margin-top: 4px; }
+@media (max-width: 760px) { .cmp-grid { grid-template-columns: 1fr; } .cmp-grid .cmp-f { background: var(--cream); } .cmp-grid .cmp-h:first-child { display: none; } }
+.cadmin-done { background: var(--sage-pale); border-radius: 2px; padding: 10px 14px; color: var(--bark); margin: 10px 0; }
+.herb-merge .cadmin-filter select { flex: 1 1 240px; min-width: 0; }
+.match-step > p.match-label { font-style: normal; margin: 18px 0 8px; font-size: 11px; }
+.match-step > p.match-none { margin: 10px 0; }

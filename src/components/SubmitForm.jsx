@@ -1,3 +1,12 @@
+// IBVU v6.15 — what changed in this file: catching duplicates.
+// - Before sending, the herb is compared with the Herbarium (name and other names; see
+//   src/lib/dupes.js). If it is very likely already there, the person is asked "Is it one of
+//   these?". They are never blocked: "No, it's a different plant" sends it as before.
+// - "Yes, add my information to it" shows what the Herbarium already lists and which of their
+//   names and uses are new; they untick anything they don't want to send, and it is sent as
+//   additions to that herb (the reviewer decides what is added).
+// - Only confident matches are shown here; close spellings are left for the reviewer.
+//
 // IBVU v6.07 — what changed in this file: a herb submission is counted in Google Analytics (only with consent; no
 // details of the submission are sent).
 //
@@ -26,11 +35,20 @@ import { SUPABASE_READY, SUBMISSIONS_KEY, sbInsert } from '../lib/supabase.js';
 import { proxyPubMed, EDGE_VERIFY_TURNSTILE_URL, TURNSTILE_SITE_KEY } from '../lib/edge.js';
 import { SUPABASE_ANON_KEY } from '../lib/supabase.js';
 import { fileToImage, submitHerbPhoto, usePage } from '../lib/content.js';
+import { findMatches, newItems, splitNames } from '../lib/dupes.js';
+import { Link } from 'react-router-dom';
 
 const BLANK = { name: "", otherNames: "", uses: "", country: "", email: "", consent: false };
 
-export default function SubmitForm() {
+export default function SubmitForm({ herbs = [] }) {
   const [form, setForm]             = useState(BLANK);
+  // v6.15: null (not asked yet) | "ask" (Is it one of these?) | "add" (what to add) |
+  // "new" (a different plant) | "adding" (sending additions)
+  const [matchStep, setMatchStep]   = useState(null);
+  const [matches, setMatches]       = useState([]);
+  const [target, setTarget]         = useState(null);
+  const [offer, setOffer]           = useState({ names: [], uses: [] });
+  const [picked, setPicked]         = useState({});
   const [screening, setScreening]   = useState(null);
   const [paperCount, setPaperCount] = useState(0);
   const [done, setDone]             = useState(false);
@@ -79,6 +97,21 @@ export default function SubmitForm() {
     const val = e.target.type === "checkbox" ? e.target.checked : e.target.value;
     setForm(f => ({ ...f, [e.target.name]: val }));
     setErrors(er => ({ ...er, [e.target.name]: undefined }));
+    if (["name", "otherNames"].includes(e.target.name)) setMatchStep(null);
+  }
+
+  // v6.15: "Is it one of these?"
+  function chooseHerb(herb) {
+    const names = newItems([form.name, ...splitNames(form.otherNames)], [herb.name, ...(herb.altNames || [])]);
+    const uses = newItems(form.uses, herb.uses || []);
+    setTarget(herb);
+    setOffer({ names, uses });
+    setPicked(Object.fromEntries([...names.map(n => ["n:" + n, true]), ...uses.map(u => ["u:" + u, true])]));
+    setMatchStep("add");
+  }
+  function resetAll() {
+    setDone(false); setForm(BLANK); setScreening(null); setPaperCount(0); setPhoto(""); setPhotoMine(false);
+    setMatchStep(null); setMatches([]); setTarget(null); setOffer({ names: [], uses: [] }); setPicked({});
   }
 
   function validate() {
@@ -91,13 +124,19 @@ export default function SubmitForm() {
     return e;
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(step = matchStep) {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
+    // v6.15: ask first if the herb is very likely already in the Herbarium
+    if (step === null && herbs.length) {
+      const found = findMatches({ name: form.name, otherNames: form.otherNames }, herbs, "likely").slice(0, 3);
+      if (found.length) { setMatches(found); setMatchStep("ask"); return; }
+    }
     if (!tsToken) {
       setErrors(prev => ({ ...prev, _turnstile: "Please wait for the security check to complete." }));
       return;
     }
+    const adding = step === "add" && target;
     setScreening("checking");
 
     try {
@@ -151,18 +190,28 @@ export default function SubmitForm() {
       }
       setPaperCount(count);
 
+      // v6.15: additions to an existing herb send only what the person kept ticked
+      const keptNames = offer.names.filter(n => picked["n:" + n]);
+      const keptUses = offer.uses.filter(u => picked["u:" + u]);
       const entry = {
         id:         Date.now(),
         timestamp:  new Date().toISOString(),
         name:       form.name.trim(),
-        otherNames: form.otherNames.trim(),
-        uses:       form.uses.trim(),
+        otherNames: adding ? keptNames.filter(n => n !== form.name.trim()).join(", ") : form.otherNames.trim(),
+        uses:       adding ? (keptUses.join(", ") || form.uses.trim()) : form.uses.trim(),
         country:    form.country.trim(),
         email:      form.email.trim(),
         consent:    form.consent,
         status,
         paperCount: count,
       };
+      if (adding) {
+        const m = matches.find(x => x.herb.ref === target.ref);
+        entry.targetHerb = target.ref;
+        entry.targetName = target.name;
+        entry.matchNote = (m ? m.reasons.join("; ") : "chosen by the person submitting") +
+          (keptNames.includes(form.name.trim()) ? "" : ". Name they used: " + form.name.trim());
+      }
 
       if (SUPABASE_READY) {
         await sbInsert(entry);
@@ -173,7 +222,8 @@ export default function SubmitForm() {
       // Preview: the photo (if any) waits in this browser for review.
       if (sendsPhoto && !photoSent && !SUPABASE_READY) submitHerbPhoto(form.name, photo);
       setDone(true);
-      track("herb_submitted", { with_photo: !!sendsPhoto });
+      if (adding) setMatchStep("adding");
+      track("herb_submitted", { with_photo: !!sendsPhoto, additions: !!adding });
     } catch (_) {
       setScreening("error");
     }
@@ -187,13 +237,25 @@ export default function SubmitForm() {
     catch (err) { setPhotoError(err.message); }
   }
 
+  if (done && matchStep === "adding" && target) {
+    return (
+      <div className="result-card">
+        <h3>Thank you</h3>
+        <p>Your additions to <strong>{target.name}</strong> have been sent. Our team checks them before anything is added to the Herbarium.{form.consent ? " We'll email you at " + form.email + " when they are added." : ""}</p>
+        {screening === "preview" && <p className="preview-note">Preview only: this was saved in this browser only.</p>}
+        <span className="result-badge green">✓ Sent as additions to {target.name}</span>
+        <button className="result-new-btn" onClick={resetAll}>Submit another herb →</button>
+      </div>
+    );
+  }
+
   if (done && screening === "preview") {
     return (
       <div className="result-card">
         <h3>Submission Received</h3>
         <p>Your herb has been submitted for review.{photo ? " Your photo will be checked before it is shown." : ""}</p>
         <p className="preview-note">Preview only: without the database connection the literature check did not run and this submission was saved in this browser only.</p>
-        <button className="result-new-btn" onClick={() => { setDone(false); setForm(BLANK); setScreening(null); setPaperCount(0); setPhoto(""); setPhotoMine(false); }}>
+        <button className="result-new-btn" onClick={resetAll}>
           Submit another herb →
         </button>
       </div>
@@ -212,15 +274,83 @@ export default function SubmitForm() {
         <span className={"result-badge " + (screening === "passed" ? "green" : "amber")}>
           {screening === "passed" ? "✓ Evidence found · " + paperCount + " papers" : "⚠ Insufficient evidence"}
         </span>
-        <button className="result-new-btn" onClick={() => { setDone(false); setForm(BLANK); setScreening(null); setPaperCount(0); setPhoto(""); setPhotoMine(false); }}>
+        <button className="result-new-btn" onClick={resetAll}>
           Submit another herb →
         </button>
       </div>
     );
   }
 
+  // v6.15: the two extra steps are shown above the form; the form stays on the page (hidden)
+  // so its security check keeps working.
+  let stepPanel = null;
+  if (matchStep === "ask") {
+    stepPanel = (
+      <div className="form-wrap match-step" data-step="ask">
+        <h2>Thanks! We may already have this plant</h2>
+        <p>Is it one of these? If it is, you can add your names and uses to the existing entry instead of starting a new one.</p>
+        {matches.map(m => (
+          <div className="match-herb" key={m.herb.ref || m.herb.slug}>
+            <div className="match-herb-text">
+              <h3>{m.herb.name}</h3>
+              {m.herb.latinName && <p className="match-latin">{m.herb.latinName}</p>}
+              <p className="match-why">Matched: {m.reasons.join("; ")}</p>
+              {m.herb.slug && <Link className="match-open" to={"/educate/hs/" + m.herb.slug} target="_blank" rel="noopener">Open this herb’s page ↗</Link>}
+            </div>
+            <button type="button" className="submit-btn match-yes" onClick={() => chooseHerb(m.herb)}>Yes, add my information to it</button>
+          </div>
+        ))}
+        <div className="match-actions">
+          <button type="button" className="match-no" onClick={() => { setMatchStep("new"); handleSubmit("new"); }}>No, it’s a different plant: send it as a new herb</button>
+          <button type="button" className="match-back" onClick={() => setMatchStep(null)}>← Back to my form</button>
+        </div>
+        {screening === "checking" && <div className="screen-status checking"><div className="screen-spinner" />Searching PubMed for evidence…</div>}
+        {screening === "error" && <div className="screen-status error">⚠ Could not reach PubMed. Check your connection and try again.</div>}
+        {errors._turnstile && <div className="match-error">{errors._turnstile}</div>}
+      </div>
+    );
+  } else if (matchStep === "add" && target) {
+    const already = [...(target.altNames || [])];
+    const nothingNew = offer.names.length + offer.uses.length === 0;
+    const toggle = k => setPicked(p => ({ ...p, [k]: !p[k] }));
+    stepPanel = (
+      <div className="form-wrap match-step" data-step="add">
+        <h2>What would you like to add to {target.name}?</h2>
+        <p className="match-label">Already in the Herbarium</p>
+        <div className="match-chips">
+          {already.map(n => <span className="match-chip" key={"a" + n}>{n}</span>)}
+          {(target.uses || []).map(u => <span className="match-chip" key={"u" + u}>{u}</span>)}
+          {already.length + (target.uses || []).length === 0 && <span className="match-none">No other names or uses listed yet.</span>}
+        </div>
+        {nothingNew ? (
+          <p className="match-none">Everything you entered is already listed. Thank you! You can still send it, for example to add your photo, or go back.</p>
+        ) : (
+          <>
+            <p className="match-label">New from you (untick anything you don’t want to send)</p>
+            <div className="match-picks">
+              {offer.names.map(n => <label className="match-pick" key={"n" + n}><input type="checkbox" checked={!!picked["n:" + n]} onChange={() => toggle("n:" + n)} /> Other name: {n}</label>)}
+              {offer.uses.map(u => <label className="match-pick" key={"u" + u}><input type="checkbox" checked={!!picked["u:" + u]} onChange={() => toggle("u:" + u)} /> Use: {u}{form.country ? " (" + form.country.trim() + ")" : ""}</label>)}
+            </div>
+          </>
+        )}
+        {errors._turnstile && <div className="match-error">{errors._turnstile}</div>}
+        <button type="button" className="submit-btn" onClick={() => handleSubmit("add")}
+          disabled={screening === "checking" || !tsToken}
+          style={{ opacity: (screening === "checking" || !tsToken) ? 0.6 : 1 }}>
+          {screening === "checking" ? "Sending…" : "Send my additions →"}
+        </button>
+        <div className="match-actions">
+          <button type="button" className="match-back" onClick={() => setMatchStep("ask")}>← It’s not this herb</button>
+        </div>
+        {screening === "error" && <div className="screen-status error">⚠ Could not reach PubMed. Check your connection and try again.</div>}
+      </div>
+    );
+  }
+
   return (
-    <div className="form-wrap">
+    <>
+    {stepPanel}
+    <div className="form-wrap" style={stepPanel ? { display: "none" } : undefined}>
       <h2>Submit an Herb</h2>
       <p>Contribute a plant to the Herbarium. Submissions are automatically screened against PubMed before review.</p>
 
@@ -295,7 +425,7 @@ export default function SubmitForm() {
 
       <button
         className="submit-btn"
-        onClick={handleSubmit}
+        onClick={() => handleSubmit()}
         disabled={screening === "checking" || !tsToken}
         style={{ opacity: (screening === "checking" || !tsToken) ? 0.6 : 1, cursor: (screening === "checking" || !tsToken) ? "not-allowed" : "pointer" }}
       >
@@ -314,5 +444,6 @@ export default function SubmitForm() {
         </div>
       )}
     </div>
+    </>
   );
 }
