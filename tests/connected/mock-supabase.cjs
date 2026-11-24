@@ -1,3 +1,7 @@
+// IBVU v6.15 — what changed in this file: the duplicate tables (database step 5):
+// herb_merges (everyone reads which herbs are merged, only from_ref and into_ref; herb
+// reviewers write) and herb_not_duplicates (herb reviewers only). Submissions accept
+// target_herb, target_name and match_note. Test helper POST /__seed adds rows directly.
 // IBVU v6.12 — what changed in this file: the old herb tables follow the new rules
 // (database step 4): only herb reviewers read submissions and the edit log and change
 // published herbs; visitors may only send a submission and read the public columns of
@@ -31,6 +35,7 @@ const db = {
   approved_herbs: [], static_herbs: [], submissions: [], herb_edits: [],
   newsletter_issues: [], newsletter_sends: [], admin_reminder_recipients: [], content_drafts: [],
   article_reviews: [], article_comments: [],
+  herb_merges: [], herb_not_duplicates: [],
   newsletter_reminder_settings: [{ id: 1, due_enabled: true, due_day: 25, due_list: 'monthly', before_enabled: true, before_hours: 24, after_enabled: true }],
 };
 const emails = []; // what send-newsletter would have emailed
@@ -91,6 +96,7 @@ function visible(table, rows, who) {
     case 'content_drafts': return staff ? rows : null;
     case 'article_reviews': case 'article_comments': return null;   // only through the functions
     case 'submissions': case 'herb_edits': return who.review ? rows : null;   // v6.12
+    case 'herb_not_duplicates': return who.review ? rows : null;              // v6.15
     default: return rows;
   }
 }
@@ -112,7 +118,7 @@ function filterRows(rows, params) {
   const limit = params.get('limit'); if (limit) out = out.slice(0, Number(limit));
   return out;
 }
-const KEYS = { site_pages: 'key', newsletter_signups: 'email' };
+const KEYS = { site_pages: 'key', newsletter_signups: 'email', herb_merges: 'from_ref', herb_not_duplicates: 'pair' };
 function defaults(table, row) {
   const nowIso = new Date().toISOString();
   const r = { ...row };
@@ -120,6 +126,7 @@ function defaults(table, row) {
   if (table !== 'site_pages' && !r.created_at) r.created_at = nowIso;
   if (table === 'newsletter_issues') { if (!r.status) r.status = 'draft'; if (r.recipients == null) r.recipients = 0; if (r.failures == null) r.failures = 0; }
   if (table === 'site_history' && !r.at) r.at = nowIso;
+  if (table === 'herb_merges' && !r.merged_at) r.merged_at = nowIso;
   return r;
 }
 
@@ -141,6 +148,7 @@ http.createServer(async (req, res) => {
   if (p === '/__log') return send(res, 200, log);
   if (p === '/__db') return send(res, 200, { db, store: Object.keys(store), users: Object.keys(users) });
   if (p === '/__emails') return send(res, 200, emails);
+  if (p === '/__seed' && req.method === 'POST') { for (const r of json.rows) db[json.table].push(defaults(json.table, r)); return send(res, 200, { ok: true }); }
 
   // ── database functions
   if (p === '/rest/v1/rpc/newsletter_list_counts') {
@@ -410,7 +418,14 @@ http.createServer(async (req, res) => {
       if (cols.some(c => !PUBLIC_HERB.includes(c))) return send(res, 401, { code: '42501', message: 'permission denied for table approved_herbs' });
       return returnRows(filterRows(seen, url.searchParams).map(r => Object.fromEntries(cols.map(c => [c, r[c]]))));
     }
+    // v6.15: visitors may only read which herbs are merged
+    if (table === 'herb_merges' && !who.review && (req.method === 'GET' || req.method === 'HEAD')) {
+      const cols = (url.searchParams.get('select') || '*').split(',');
+      if (cols.some(c => !['from_ref', 'into_ref'].includes(c))) return send(res, 401, { code: '42501', message: 'permission denied for table herb_merges' });
+      return returnRows(filterRows(seen, url.searchParams).map(r => Object.fromEntries(cols.map(c => [c, r[c]]))));
+    }
     if (req.method === 'GET' || req.method === 'HEAD') return returnRows(filterRows(seen, url.searchParams));
+    if (['herb_merges', 'herb_not_duplicates'].includes(table) && !who.review) return send(res, 401, { code: '42501', message: 'new row violates row-level security policy for table "' + table + '"' });
     if (['approved_herbs', 'herb_edits'].includes(table) && !who.review) return send(res, 401, { code: '42501', message: 'new row violates row-level security policy for table "' + table + '"' });
     if (table === 'submissions' && req.method !== 'POST' && !who.review) return send(res, 401, { code: '42501', message: 'permission denied for table submissions' });
     if (table === 'submissions' && req.method === 'POST' && (Array.isArray(json) ? json : [json]).some(r => r && r.review_status && r.review_status !== 'pending')) return send(res, 403, { code: '42501', message: 'new row violates row-level security policy for table "submissions"' });

@@ -1,3 +1,9 @@
+// IBVU v6.15 — what changed in this file: duplicates. The Ginger submission answers "No, it's
+// a different plant" (Ginger is a built-in herb, so the form now asks). New checks: a visitor
+// is asked "Is it one of these?" and sends additions to African pepper; the Owner adds them
+// in herb review; the Owner merges two copies of Neem, the old address forwards, the
+// Herbarium shows Neem once, and Undo brings it back; "Not a duplicate"; visitors cannot
+// write the new tables or read the private parts.
 // IBVU v6.12 — what changed in this file: also checks the security fix: a visitor cannot
 // read submissions, read herbs' private columns, add herbs or use the approval email; the
 // Owner reviews and publishes a submitted herb while signed in, and the edit log keeps the
@@ -125,6 +131,10 @@ export async function check() {
   await v.page.check('#photo-mine');
   await v.page.waitForTimeout(300);
   await v.page.click('button.submit-btn');
+  // v6.15: Ginger is a built-in herb, so the form asks first
+  await v.page.waitForSelector('[data-step="ask"]', { timeout: 10000 });
+  ok('submitting a herb already in the Herbarium asks "Is it one of these?"', await v.page.locator('[data-step="ask"] .match-herb:has-text("Ginger")').count() === 1);
+  await v.page.click('button.match-no');
   await v.page.waitForSelector('.result-card', { timeout: 15000 });
   d = await dbNow();
   const pendingRow = d.herb_photos.find(p => p.herb_key === 'ginger' && p.status === 'pending');
@@ -509,6 +519,91 @@ export async function check() {
   await o.page.goto(B + '/contact');
   await o.page.waitForTimeout(800);
   ok('after signing out there is no "Edit this page"', await o.page.locator('.edit-page').count() === 0);
+
+  // 7. v6.15 duplicates
+  const PEPPER = '11111111-1111-4111-8111-111111111111', NEEM1 = '22222222-2222-4222-8222-222222222222', NEEM2 = '33333333-3333-4333-8333-333333333333';
+  await fetch(M + '/__seed', { method: 'POST', body: JSON.stringify({ table: 'approved_herbs', rows: [
+    { id: PEPPER, created_at: '2026-01-01T00:00:00Z', name: 'African pepper', latin: 'Xylopia aethiopica', category: 'Herbal Medicine', origin: 'West Africa', description: 'A tree.', other_names: 'Guinea pepper, Grains of Selim', uses: ['Coughs'], conditions: [], color: '#a8c5a0', pubmed_count: 10 },
+    { id: NEEM1, created_at: '2026-01-02T00:00:00Z', name: 'Neem', latin: 'Azadirachta indica', category: 'Herbal Medicine', origin: 'India', description: 'Older copy.', other_names: 'Indian lilac', uses: ['Skin care'], conditions: [], color: '#a8c5a0', pubmed_count: 300 },
+    { id: NEEM2, created_at: '2026-01-03T00:00:00Z', name: 'Neem', latin: 'Azadirachta indica', category: 'Herbal Medicine', origin: 'India', description: 'Newer copy.', other_names: 'Nimtree', uses: ['Fever'], conditions: [], color: '#a8c5a0', pubmed_count: 200 },
+  ] }) });
+  const v3 = await newPage(browser);
+  await v3.page.goto(B + '/educate/hs/submit');
+  await v3.page.waitForSelector('input[name="name"]');
+  await v3.page.waitForTimeout(600);   // the herb list loads
+  await v3.page.fill('input[name="name"]', 'Grains of Selim');
+  await v3.page.fill('input[name="otherNames"]', 'Hwentia');
+  await v3.page.fill('input[name="uses"]', 'Coughs, Postpartum tea');
+  await v3.page.fill('input[name="country"]', 'Ghana');
+  await v3.page.fill('input[name="email"]', 'kofi@example.org');
+  await v3.page.waitForTimeout(300);
+  await v3.page.click('button.submit-btn');
+  await v3.page.waitForSelector('[data-step="ask"]', { timeout: 10000 });
+  ok('v6.15 a visitor is asked "Is it one of these?" with African pepper and why', (await v3.page.locator('[data-step="ask"]').innerText()).includes('African pepper') && (await v3.page.locator('.match-why').first().innerText()).includes('Grains of Selim'));
+  await v3.page.click('.match-herb:has-text("African pepper") .match-yes');
+  await v3.page.waitForSelector('[data-step="add"]', { timeout: 5000 });
+  const addText = await v3.page.locator('[data-step="add"]').innerText();
+  ok('v6.15 only what African pepper lacks is offered (Hwentia, Postpartum tea; not Coughs)', addText.includes('Other name: Hwentia') && addText.includes('Use: Postpartum tea') && !addText.includes('Use: Coughs'), addText.slice(0, 300).replace(/\n+/g, ' / '));
+  await v3.page.click('[data-step="add"] button.submit-btn');
+  await v3.page.waitForSelector('.result-card:has-text("African pepper")', { timeout: 15000 });
+  d = await dbNow();
+  const addSub = d.submissions.find(x => x.common_name === 'Grains of Selim');
+  ok('v6.15 sent as additions to African pepper', addSub && addSub.target_herb === 'approved:' + PEPPER && addSub.target_name === 'African pepper' && addSub.traditional_uses === 'Postpartum tea' && addSub.other_names === 'Hwentia', JSON.stringify(addSub));
+  ok('v6.15 visitor errors on pages', v3.page.errors.length === 0, v3.page.errors.join(' | '));
+
+  const o2 = await newPage(browser);
+  await signIn(o2.page, 'owner@example.org', '/admin/herbreview');
+  await o2.page.waitForSelector('tr:has-text("Grains of Selim")', { timeout: 15000 });
+  ok('v6.15 herb review shows "Additions to African pepper"', await o2.page.locator('tr:has-text("Grains of Selim") .dupe-badge:has-text("Additions to African pepper")').count() === 1);
+  await o2.page.click('tr:has-text("Grains of Selim") button:has-text("Add to existing")');
+  await o2.page.waitForSelector('[aria-label="Add to an existing herb"]', { timeout: 5000 });
+  await o2.page.click('[aria-label="Add to an existing herb"] button:has-text("Add ticked items")');
+  for (let i = 0; i < 20; i++) { d = await dbNow(); if ((d.submissions.find(x => x.common_name === 'Grains of Selim') || {}).review_status === 'approved') break; await o2.page.waitForTimeout(300); }
+  const pepper = d.approved_herbs.find(h => h.id === PEPPER);
+  ok('v6.15 the Owner added them: other name and the use with its country', pepper.other_names.includes('Hwentia') && pepper.uses.includes('Postpartum tea (traditional use in Ghana)') && pepper.uses.includes('Coughs'), JSON.stringify([pepper.other_names, pepper.uses]));
+  ok('v6.15 the submission is done and the edit log says what was added', d.submissions.find(x => x.common_name === 'Grains of Selim').review_status === 'approved' && d.herb_edits.some(e => e.action === 'add-from-submission' && e.herb_id === PEPPER));
+
+  await o2.page.goto(B + '/admin/duplicates');
+  await o2.page.waitForSelector('.herb-merge', { timeout: 10000 });
+  const neemPair = o2.page.locator('.cadmin-item[data-pair="approved:' + NEEM1 + '|approved:' + NEEM2 + '"]');
+  await neemPair.waitFor({ timeout: 10000 });
+  ok('v6.15 Duplicates lists the two copies of Neem as the same species', (await neemPair.innerText()).toLowerCase().includes('same species'));
+  await neemPair.locator('button:has-text("Merge")').click();
+  await o2.page.waitForSelector('[aria-label="Merge two herbs"]', { timeout: 5000 });
+  const keptHead = (await o2.page.locator('[aria-label="Merge two herbs"] .cmp-h').nth(1).innerText()).toLowerCase();
+  ok('v6.15 the older copy is the one kept', /\/educate\/hs\/neem$/.test(keptHead.trim()), keptHead);
+  await o2.page.click('[aria-label="Merge two herbs"] button:has-text("Merge into one herb")');
+  for (let i = 0; i < 20; i++) { d = await dbNow(); if (d.herb_merges.length) break; await o2.page.waitForTimeout(300); }
+  const kept = d.approved_herbs.find(h => h.id === NEEM1);
+  ok('v6.15 merged: the newer Neem is hidden, the kept one has both lists', d.herb_merges.some(m => m.from_ref === 'approved:' + NEEM2 && m.into_ref === 'approved:' + NEEM1) && kept.other_names.includes('Nimtree') && kept.other_names.includes('Indian lilac') && kept.uses.includes('Fever') && kept.uses.includes('Skin care') && kept.pubmed_count === 300, JSON.stringify(kept));
+  ok('v6.15 nothing was deleted', d.approved_herbs.some(h => h.id === NEEM2));
+
+  const v4 = await newPage(browser);
+  await v4.page.goto(B + '/educate/hs/neem-2');
+  await v4.page.waitForURL(/\/educate\/hs\/neem$/, { timeout: 10000 }).catch(() => {});
+  ok('v6.15 the merged herb’s old address forwards to the kept herb', v4.page.url().endsWith('/educate/hs/neem') && (await v4.page.locator('body').first().innerText()).includes('Older copy'), v4.page.url());
+  await v4.page.goto(B + '/educate/hs');
+  await v4.page.waitForSelector('.herb-card', { timeout: 10000 });
+  await v4.page.locator('.search-wrap input').fill('Neem');
+  await v4.page.waitForTimeout(400);
+  ok('v6.15 the Herbarium shows Neem once', await v4.page.locator('.herb-card').count() === 1);
+  ok('v6.15 visitors read which herbs are merged (two columns only)', (await fetch(M + '/rest/v1/herb_merges?select=from_ref,into_ref', { headers: anonH })).status === 200 && (await fetch(M + '/rest/v1/herb_merges?select=*', { headers: anonH })).status === 401);
+  ok('v6.15 visitors cannot merge or unmerge', (await fetch(M + '/rest/v1/herb_merges', { method: 'POST', headers: anonH, body: JSON.stringify({ from_ref: 'approved:x', into_ref: 'approved:y' }) })).status >= 400 && (await fetch(M + '/rest/v1/herb_merges?from_ref=eq.approved:' + NEEM2, { method: 'DELETE', headers: anonH })).status >= 400);
+  ok('v6.15 visitors cannot read or add "not a duplicate" pairs', (await fetch(M + '/rest/v1/herb_not_duplicates?select=pair', { headers: anonH })).status === 401 && (await fetch(M + '/rest/v1/herb_not_duplicates', { method: 'POST', headers: anonH, body: JSON.stringify({ pair: 'a|b' }) })).status >= 400);
+
+  await o2.page.reload();
+  await o2.page.waitForSelector('.herb-merge .cadmin-item:has-text("Undo merge")', { timeout: 10000 });
+  o2.page.once('dialog', dlg => dlg.accept());
+  await o2.page.click('.herb-merge .cadmin-item:has-text("Undo merge") button');
+  for (let i = 0; i < 20; i++) { d = await dbNow(); if (!d.herb_merges.length) break; await o2.page.waitForTimeout(300); }
+  ok('v6.15 Undo: the merge is gone and the kept herb is back as it was', d.herb_merges.length === 0 && d.approved_herbs.find(h => h.id === NEEM1).other_names === 'Indian lilac', JSON.stringify(d.approved_herbs.find(h => h.id === NEEM1)));
+  await neemPair.waitFor({ timeout: 10000 });
+  await neemPair.locator('button:has-text("Not a duplicate")').click();
+  for (let i = 0; i < 20; i++) { d = await dbNow(); if (d.herb_not_duplicates.length) break; await o2.page.waitForTimeout(300); }
+  await o2.page.waitForTimeout(500);
+  ok('v6.15 "Not a duplicate" takes the pair off the list', d.herb_not_duplicates.some(x => x.pair === 'approved:' + NEEM1 + '|approved:' + NEEM2) && await neemPair.count() === 0, JSON.stringify(d.herb_not_duplicates) + ' items: ' + await neemPair.count() + ' ' + o2.page.errors.join('|'));
+  await o2.page.screenshot({ path: OUT + '/conn-duplicates.png', fullPage: true });
+  ok('v6.15 Owner errors on pages (duplicates)', o2.page.errors.length === 0, o2.page.errors.join(' | '));
 
   // phone width
   const ph = await newPage(browser, 390, 844);

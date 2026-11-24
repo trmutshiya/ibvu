@@ -1,3 +1,6 @@
+// IBVU v6.15 — what changed in this file: herbs merged in Admin → Duplicates are left out of
+// "Add from the site" and "New in the Herbarium".
+//
 // IBVU v6.10 — what changed in this file (as in the approved trial,
 // ibvu-newsletter-pictures-trial-v2.html):
 // - Every picture, the cover too, starts at tile size: it fits inside a 340 × 227 px
@@ -56,7 +59,7 @@ import { isEmail } from '../../lib/messages.js';
 import { buildNewsletterEmail, SITE_URL } from '../../lib/newsletterEmail.js';
 import { mergeHerbs } from '../../lib/herbs.js';
 import { HERBS_FALLBACK } from '../../constants/herbs.js';
-import { sbFetchApproved, sbFetchStaticHerbs } from '../../lib/supabase.js';
+import { sbFetchApproved, sbFetchStaticHerbs, sbFetchHerbMerges } from '../../lib/supabase.js';
 import { ArticleView } from '../Media.jsx';
 import { DeleteButton, ImageField, SHAPES } from './bits.jsx';
 import emailLogo from '../../assets/email-logo.png';
@@ -121,13 +124,15 @@ function cardHTML({ title, text, href, image, more = "Read more →" }) {
 function useHerbs() {
   const [approved, setApproved] = useState([]);
   const [statics, setStatics] = useState(HERBS_FALLBACK);
+  const [merges, setMerges] = useState([]);
   useEffect(() => {
     sbFetchApproved().then(setApproved);
     sbFetchStaticHerbs().then(rows => { if (rows.length > 0) setStatics(rows); });
+    sbFetchHerbMerges().then(setMerges);
   }, []);
-  const all = mergeHerbs(statics, approved);
+  const all = mergeHerbs(statics, approved, merges);
   // Approved herbs come last, in the order they were published.
-  const newest = all.slice(all.length - approved.length).reverse().slice(0, 5);
+  const newest = all.filter(h => String(h.ref || "").startsWith("approved:")).reverse().slice(0, 5);
   return { all: all.slice().sort((a, b) => a.name.localeCompare(b.name)), newest };
 }
 

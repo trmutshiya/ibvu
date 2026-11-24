@@ -1,3 +1,17 @@
+// IBVU v6.15 — what changed in this file (duplicates and merging; needs database step 5 for
+// the new parts, works without it):
+// - Herbs carry a "ref" that names them for merging: "approved:<id>" or "builtin:<id>".
+// - New: sbFetchHerbMerges, sbAddMerge, sbRemoveMerge (merge and undo), sbFetchNotDuplicates,
+//   sbAddNotDuplicate, sbRemoveNotDuplicate, sbMoveHerbPhoto (a merged herb's photo moves to
+//   the kept herb).
+// - A submission can be "additions to an existing herb": target_herb, target_name and
+//   match_note are sent with it (if the database does not have those columns yet, it is
+//   sent without them, as before).
+// - Fix: making a built-in herb editable (sbInsertStaticHerb) now keeps its other names.
+// - Fix: Unpublish now writes its edit-log entry before removing the herb. Written after,
+//   the database refused it (the log entry pointed at a herb that no longer existed), so
+//   unpublishes were never logged.
+//
 // IBVU v6.14 — what changed in this file (Other names shown on herb pages, no database change):
 // - sbFetchApproved now passes each approved herb's other names to the Herbarium and herb
 //   pages (altNames, split at commas). Before, the names were fetched but dropped, so every
@@ -64,7 +78,23 @@ export async function sbFetchAll(table, query, asStaff = false) {
 }
 
 export async function sbInsert(entry) {
-  const res = await fetch(SUPABASE_URL + "/rest/v1/submissions", {
+  const row = {
+    common_name:       entry.name,
+    other_names:       entry.otherNames,
+    traditional_uses:  entry.uses,
+    country:           entry.country,
+    email:             entry.email,
+    consent:           entry.consent,
+    pubmed_status:     entry.status,
+    pubmed_count:      entry.paperCount,
+  };
+  // v6.15: additions to an existing herb (columns added by database step 5)
+  const extra = entry.targetHerb ? {
+    target_herb: entry.targetHerb.slice(0, 80),
+    target_name: (entry.targetName || "").slice(0, 200),
+    match_note:  (entry.matchNote || "").slice(0, 500),
+  } : null;
+  const post = body => fetch(SUPABASE_URL + "/rest/v1/submissions", {
     method:  "POST",
     headers: {
       "Content-Type":  "application/json",
@@ -72,17 +102,14 @@ export async function sbInsert(entry) {
       "Authorization": "Bearer " + SUPABASE_ANON_KEY,
       "Prefer":        "return=minimal",
     },
-    body: JSON.stringify({
-      common_name:       entry.name,
-      other_names:       entry.otherNames,
-      traditional_uses:  entry.uses,
-      country:           entry.country,
-      email:             entry.email,
-      consent:           entry.consent,
-      pubmed_status:     entry.status,
-      pubmed_count:      entry.paperCount,
-    }),
+    body: JSON.stringify(body),
   });
+  let res = await post(extra ? { ...row, ...extra } : row);
+  if (!res.ok && extra && res.status >= 400 && res.status < 500) {
+    // Database step 5 not run yet: keep the herb it was meant for in the other names
+    // column's note instead, so the reviewer still sees it.
+    res = await post({ ...row, other_names: [row.other_names, "(additions to " + extra.target_name + ")"].filter(Boolean).join(" ") });
+  }
   if (!res.ok) throw new Error("Supabase insert failed: " + res.status);
 }
 
@@ -101,6 +128,9 @@ export async function sbFetch() {
       status:        r.pubmed_status,
       paperCount:    r.pubmed_count,
       review_status: r.review_status || "pending",
+      targetHerb:    r.target_herb || "",
+      targetName:    r.target_name || "",
+      matchNote:     r.match_note || "",
     };
   });
 }
@@ -185,13 +215,14 @@ export async function sbLogHerbEdit(herbId, herbName, action, changedBy, newValu
   } catch (e) { console.warn("Audit log failed (non-fatal):", e); }
 }
 
-export async function sbUnpublishHerb(id, herbName, changedBy) {
+export async function sbUnpublishHerb(id, herbName, changedBy, record) {
+  // Log first: once the herb is gone the log entry can no longer point at it.
+  await sbLogHerbEdit(id, herbName || "unknown", "unpublish", changedBy, record ? { deleted_record: record } : null);
   const res = await staffFetch("approved_herbs?id=eq." + id, {
     method: "DELETE",
     headers: { "Prefer": "return=minimal" },
   });
   if (!res.ok) throw new Error("Unpublish failed: " + res.status);
-  sbLogHerbEdit(id, herbName || "unknown", "unpublish", changedBy, null);
 }
 
 export async function sbInsertStaticHerb(herbData, changedBy) {
@@ -204,9 +235,11 @@ export async function sbInsertStaticHerb(herbData, changedBy) {
       category:    herbData.category,
       origin:      herbData.origin,
       description: herbData.description,
+      other_names: herbData.other_names || null,
       uses:        herbData.uses,
       conditions:  herbData.conditions,
       color:       herbData.color,
+      pubmed_count: herbData.pubmed_count || null,
       updated_at:  new Date().toISOString(),
       updated_by:  changedBy || null,
     }),
@@ -234,6 +267,9 @@ export async function sbFetchApproved() {
         conditions:  Array.isArray(r.conditions) ? r.conditions : [],
         color:       r.color || "#a8c5a0",
         altNames:    (r.other_names || "").split(",").map(n => n.trim()).filter(Boolean),
+        uuid:        r.id,
+        ref:         "approved:" + r.id,
+        pubmedCount: r.pubmed_count || 0,
       };
     });
   } catch { return []; }
@@ -258,7 +294,58 @@ export async function sbFetchStaticHerbs() {
         uses:        Array.isArray(r.uses) ? r.uses : [],
         conditions:  Array.isArray(r.conditions) ? r.conditions : [],
         papers:      [],
+        ref:         "builtin:" + r.id,
       };
     });
   } catch (e) { console.warn("sbFetchStaticHerbs failed:", e); return []; }
+}
+
+// ── v6.15: merged herbs and "not a duplicate" pairs ─────────────────────────
+// Which herbs have been merged into another. Everyone reads from_ref and into_ref; herb
+// reviewers read the whole row (with the values kept for Undo). Before database step 5 is
+// run there is no such table and this returns an empty list.
+export async function sbFetchHerbMerges(asStaff = false) {
+  if (!SUPABASE_READY) return [];
+  try {
+    return await sbFetchAll("herb_merges", asStaff ? "select=*&order=merged_at.desc" : "select=from_ref,into_ref", asStaff);
+  } catch { return []; }
+}
+export async function sbAddMerge(row) {
+  const res = await staffFetch("herb_merges", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Prefer": "return=minimal" },
+    body: JSON.stringify(row),
+  });
+  if (!res.ok) throw new Error(res.status === 404 ? "Merging needs database step 5 (see the build notes)." : "Merge failed: " + res.status);
+}
+export async function sbRemoveMerge(fromRef) {
+  const res = await staffFetch("herb_merges?from_ref=eq." + encodeURIComponent(fromRef), { method: "DELETE", headers: { "Prefer": "return=minimal" } });
+  if (!res.ok) throw new Error("Undo failed: " + res.status);
+}
+export async function sbFetchNotDuplicates() {
+  if (!SUPABASE_READY) return [];
+  try { return (await sbFetchAll("herb_not_duplicates", "select=pair", true)).map(r => r.pair); }
+  catch { return []; }
+}
+export async function sbAddNotDuplicate(pair, changedBy) {
+  const res = await staffFetch("herb_not_duplicates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Prefer": "return=minimal" },
+    body: JSON.stringify({ pair, created_by: changedBy || null }),
+  });
+  if (!res.ok) throw new Error(res.status === 404 ? "This needs database step 5 (see the build notes)." : "Could not save: " + res.status);
+}
+export async function sbRemoveNotDuplicate(pair) {
+  const res = await staffFetch("herb_not_duplicates?pair=eq." + encodeURIComponent(pair), { method: "DELETE", headers: { "Prefer": "return=minimal" } });
+  if (!res.ok) throw new Error("Could not save: " + res.status);
+}
+// Photos are kept by the herb's address (herb_key). When a herb is merged away, its approved
+// photo moves to the kept herb if that herb has none.
+export async function sbMoveHerbPhoto(fromKey, toKey, toName) {
+  const res = await staffFetch("herb_photos?herb_key=eq." + encodeURIComponent(fromKey) + "&status=eq.approved", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "Prefer": "return=minimal" },
+    body: JSON.stringify({ herb_key: toKey, herb_name: toName }),
+  });
+  if (!res.ok) throw new Error("Moving the photo failed: " + res.status);
 }

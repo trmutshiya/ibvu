@@ -1,3 +1,8 @@
+// IBVU v6.15 — what changed in this file: admin has a twelfth section, Duplicates (for herb
+// reviewers). New checks: the submission form asks "Is it one of these?" for a herb already
+// in the Herbarium and still lets the person send it as a different plant; Duplicates shows
+// possible duplicates in the preview without merging.
+//
 // IBVU v6.11 — what changed in this file: checks the review loop for articles (send for review, take back, comments on words and on the whole text, send back, reply, mark done, publish).
 // IBVU v6.10 — what changed in this file: checks that newsletter pictures and the cover start at tile size, resize by dragging in Write, the email and the web page, and show smaller on a phone.
 //
@@ -330,6 +335,38 @@ test("submission form: a photo needs the 'my own photo' tick", async ({ page }) 
   await expect(page.getByRole("button", { name: "Choose a photo" })).toBeVisible();
 });
 
+test("v6.15 submission form: a herb already in the Herbarium is asked about, and can still be sent as new", async ({ page }) => {
+  await page.goto("/educate/hs/submit");
+  await page.locator('input[name="name"]').fill("Tulsi");
+  await page.locator('input[name="uses"]').fill("Stress, Coughs");
+  await page.locator('input[name="country"]').fill("India");
+  await page.locator('input[name="email"]').fill("test@example.org");
+  await page.locator("button.submit-btn").click();
+  const ask = page.locator('[data-step="ask"]');
+  await expect(ask).toBeVisible();
+  await expect(ask.locator(".match-herb h3")).toHaveText(["Holy Basil"]);
+  await expect(ask.locator(".match-why")).toContainText("Tulsi");
+  await noSidewaysScroll(page);
+  await ask.getByRole("button", { name: "Yes, add my information to it" }).click();
+  const add = page.locator('[data-step="add"]');
+  await expect(add).toContainText("What would you like to add to Holy Basil?");
+  await expect(add.locator(".match-pick")).toHaveText([/Use: Stress \(India\)/, /Use: Coughs \(India\)/]);
+  await add.getByRole("button", { name: "← It’s not this herb" }).click();
+  await ask.getByRole("button", { name: /No, it’s a different plant/ }).click();
+  await expect(page.locator(".result-card")).toBeVisible();
+});
+
+test("v6.15 submission form: a new plant goes straight through", async ({ page }) => {
+  await page.goto("/educate/hs/submit");
+  await page.locator('input[name="name"]').fill("Rooibos");
+  await page.locator('input[name="uses"]').fill("Tea");
+  await page.locator('input[name="country"]').fill("South Africa");
+  await page.locator('input[name="email"]').fill("test@example.org");
+  await page.locator("button.submit-btn").click();
+  await expect(page.locator(".result-card")).toBeVisible();
+  await expect(page.locator('[data-step="ask"]')).toHaveCount(0);
+});
+
 test.describe("admin (sign-in and roles)", () => {
   const sections = (page) => page.locator(".cadmin-home-card h2");
 
@@ -359,7 +396,7 @@ test.describe("admin (sign-in and roles)", () => {
   }
 
   test("every admin address asks for sign-in first, and shows nothing before it", async ({ page }) => {
-    for (const s of ["", "/herbreview", "/herbphotos", "/events", "/articles", "/blog", "/pages", "/people", "/history", "/messages", "/newsletters", "/lists"]) {
+    for (const s of ["", "/herbreview", "/herbphotos", "/duplicates", "/events", "/articles", "/blog", "/pages", "/people", "/history", "/messages", "/newsletters", "/lists"]) {
       await page.goto("/admin" + s);
       await expect(page.getByRole("heading", { name: "IBVU Admin" })).toBeVisible();
       await expect(page.locator(".admin-switch")).toHaveCount(0);
@@ -375,8 +412,8 @@ test.describe("admin (sign-in and roles)", () => {
 
   test("Owner sees every section, each with its own address, and can sign out", async ({ page }) => {
     await signIn(page, "hello@ibvu.org");
-    await expect(sections(page)).toHaveCount(11);
-    for (const s of ["herbreview", "herbphotos", "events", "articles", "blog", "pages", "people", "history", "messages", "newsletters", "lists"]) {
+    await expect(sections(page)).toHaveCount(12);
+    for (const s of ["herbreview", "herbphotos", "duplicates", "events", "articles", "blog", "pages", "people", "history", "messages", "newsletters", "lists"]) {
       await page.goto("/admin/" + s);
       await expect(page.locator(".admin-switch")).toBeVisible();
       await expect(page.getByText("is not part of your access")).toHaveCount(0);
@@ -386,6 +423,15 @@ test.describe("admin (sign-in and roles)", () => {
     await signOut(page);
     await page.goto("/admin/people");
     await expect(page.getByRole("heading", { name: "IBVU Admin" })).toBeVisible();
+  });
+
+  test("v6.15 Duplicates: possible duplicates are listed; merging is for the live database", async ({ page }) => {
+    await signIn(page, "hello@ibvu.org", "/admin/duplicates");
+    await expect(page.getByRole("heading", { name: "Duplicates", level: 2 })).toBeVisible();
+    await expect(page.getByText("Merging works on the live database.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Possible duplicates/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Merge any two herbs/ })).toBeVisible();
+    await noSidewaysScroll(page);
   });
 
   test("signing in at a section's address lands on that section", async ({ page }) => {
@@ -409,7 +455,7 @@ test.describe("admin (sign-in and roles)", () => {
     await signOut(page);
 
     await signIn(page, "reviewer@example.org");
-    await expect(sections(page)).toHaveText([/Herb review/, /Herb photos/, /Events/, /Articles/, /Blog/]);
+    await expect(sections(page)).toHaveText([/Herb review/, /Herb photos/, /Duplicates/, /Events/, /Articles/, /Blog/]);
     await signOut(page);
 
     await signIn(page, "editor@example.org");
@@ -484,7 +530,7 @@ test.describe("admin (sign-in and roles)", () => {
     await expect(page.locator(".edit-page")).toHaveCount(0);
 
     await signIn(page, "hello@ibvu.org");
-    await expect(sections(page)).toHaveCount(11);
+    await expect(sections(page)).toHaveCount(12);
     await page.goto("/contact");
     await page.getByRole("link", { name: /Edit this page/ }).click();
     await expect(page).toHaveURL(/\/admin\/pages\?page=contact$/);
@@ -873,7 +919,7 @@ test.describe("admin (sign-in and roles)", () => {
 
   test("every page has a form in admin", async ({ page }) => {
     await signIn(page, "hello@ibvu.org");
-    await expect(sections(page)).toHaveCount(11);
+    await expect(sections(page)).toHaveCount(12);
     await page.goto("/admin/pages");
     await expect(page.locator(".cadmin-subtabs button")).toHaveText(["Home", "About", "Regulate", "Herbarium", "Media and Blog", "Shop", "Innovate", "Contact", "Privacy", "Newsletter and footer"]);
     for (const key of ["home", "about", "regulate", "herbarium", "writing", "shop", "innovate", "contact", "privacy", "site"]) {

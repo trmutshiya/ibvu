@@ -1,3 +1,7 @@
+// IBVU v6.15 — what changed in this file: new section Duplicates (ibvu.org/admin/duplicates,
+// for people with the herb review tick): possible duplicate herbs, merge with undo (see
+// HerbMergeAdmin.jsx). Herb photos lists leave out merged herbs.
+//
 // IBVU v6.11 — what changed in this file: Articles and Blog have the review step (as in the
 // approved mock-up). A Writer sends an article or post for review and can take it back
 // while it waits (it cannot be changed while waiting). An Editor or Owner comments (on
@@ -123,7 +127,7 @@ import { shareLinks, copyText } from '../Share.jsx';
 import { usePageTitle } from '../../lib/site.js';
 import { mergeHerbs } from '../../lib/herbs.js';
 import { HERBS_FALLBACK } from '../../constants/herbs.js';
-import { SUPABASE_READY, sbFetchApproved, sbFetchStaticHerbs } from '../../lib/supabase.js';
+import { SUPABASE_READY, sbFetchApproved, sbFetchStaticHerbs, sbFetchHerbMerges } from '../../lib/supabase.js';
 
 const RichEditor = lazy(() => import('./RichEditor.jsx'));
 const AdminPanel = lazy(() => import('../AdminPanel.jsx'));
@@ -134,6 +138,7 @@ import FrameEditor, { FramePreview } from './FrameEditor.jsx';
 import { BUILTIN_IMAGES, IMAGE_SHAPES } from '../../content/builtinImages.js';
 import { parseImage, buildImage } from '../../lib/frame.js';
 import AdminSignIn from './AdminSignIn.jsx';
+import HerbMergeAdmin from './HerbMergeAdmin.jsx';
 import { DEMO_SIGN_IN } from '../../lib/auth.js';
 
 /* ── small shared pieces ─────────────────────────────────────────────── */
@@ -1012,11 +1017,13 @@ function HistoryAdmin() {
 function useHerbList() {
   const [approved, setApproved] = useState([]);
   const [statics, setStatics] = useState(HERBS_FALLBACK);
+  const [merges, setMerges] = useState([]);
   useEffect(() => {
     sbFetchApproved().then(setApproved);
     sbFetchStaticHerbs().then(rows => { if (rows.length > 0) setStatics(rows); });
+    sbFetchHerbMerges().then(setMerges);
   }, []);
-  return mergeHerbs(statics, approved)
+  return mergeHerbs(statics, approved, merges)
     .slice().sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -1147,6 +1154,7 @@ function HerbReviewSection({ session }) {
 const SECTIONS = [
   { id: "herbreview", label: "Herb review", about: "Review herb submissions, publish and edit herbs, export the list.", allowed: s => canReviewHerbs(s) },
   { id: "herbphotos", label: "Herb photos", about: "Approve photos sent in with herbs, and add photos to published herbs.", allowed: s => canReviewHerbs(s) },
+  { id: "duplicates", label: "Duplicates", about: "Herbs that may be the same plant: merge them into one, or mark them as different.", allowed: s => canReviewHerbs(s) },
   { id: "events",     label: "Events",      about: "Add, edit, publish and remove events.", allowed: s => can(s.role, "draft") },
   { id: "articles",   label: "Articles",    about: "Write drafts, preview and publish to Media.", allowed: s => can(s.role, "draft") },
   { id: "blog",       label: "Blog",        about: "Write drafts, preview and publish to the Blog.", allowed: s => can(s.role, "draft") },
@@ -1262,13 +1270,14 @@ export default function AdminArea() {
           {current && !permitted && (
             <div className="cadmin-card">
               <h2>{current.label} is not part of your access</h2>
-              <p>{current.id === "herbreview" || current.id === "herbphotos"
+              <p>{current.id === "herbreview" || current.id === "herbphotos" || current.id === "duplicates"
                 ? "This section needs the herb review tick. An Owner can switch it on for you under People."
                 : "Your role (" + ROLES[role].name + ") does not include this section. An Owner can change your role under People."}</p>
               <p><Link className="cadmin-btn" to="/admin">Go to the admin front page</Link></p>
             </div>
           )}
           {permitted && section === "herbphotos" && <HerbPhotosAdmin onError={setError} />}
+          {permitted && section === "duplicates" && <HerbMergeAdmin adminLabel={ROLES[role].name} onError={setError} />}
           {permitted && section === "events" && <EventsAdmin role={role} onError={setError} />}
           {permitted && section === "articles" && <ArticlesAdmin key="media" section="media" role={role} onError={setError} />}
           {permitted && section === "blog" && <ArticlesAdmin key="blog" section="blog" role={role} onError={setError} />}

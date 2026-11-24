@@ -1,3 +1,4 @@
+// IBVU v6.15 — what changed in this file: herbs merged in Admin → Duplicates are left out.
 // IBVU v6.03 — what changed in this file: the newsletter page and published issues are listed.
 // IBVU v6.0 — what changed in this file: published articles and blog posts are listed too.
 // IBVU v5.92 — what changed in this file: herb addresses come from the same rule the site uses
@@ -41,15 +42,23 @@ function setting(name) {
 async function namesFromDatabase() {
   const url = setting("VITE_SUPABASE_URL"), key = setting("VITE_SUPABASE_ANON_KEY");
   if (!url || url.startsWith("https://YOUR_") || !key) return null;
-  const names = { builtIn: [], approved: [] };
+  const names = { builtIn: [], approved: [], merges: [] };
   for (const [table, order, into] of [["static_herbs", "id.asc", "builtIn"], ["approved_herbs", "created_at.asc", "approved"]]) {
-    const res = await fetch(url + "/rest/v1/" + table + "?select=name&order=" + order + "&limit=2000", {
+    const res = await fetch(url + "/rest/v1/" + table + "?select=id,name&order=" + order + "&limit=2000", {
       headers: { apikey: key, Authorization: "Bearer " + key },
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) throw new Error(table + " " + res.status);
-    for (const row of await res.json()) if (row.name) names[into].push({ name: row.name });
+    for (const row of await res.json()) if (row.name) names[into].push({ id: row.id, uuid: row.id, name: row.name });
   }
+  // v6.15: merged herbs are left out (no table before database step 5: nothing is merged)
+  try {
+    const res = await fetch(url + "/rest/v1/herb_merges?select=from_ref,into_ref&limit=2000", {
+      headers: { apikey: key, Authorization: "Bearer " + key },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) names.merges = await res.json();
+  } catch { /* none */ }
   return names;
 }
 
@@ -87,7 +96,7 @@ try {
   catch { /* fixed pages only */ }
 }
 
-const herbPages = mergeHerbs(names.builtIn, names.approved).map(h => h.slug).sort().map(s => "/educate/hs/" + s);
+const herbPages = mergeHerbs(names.builtIn, names.approved, names.merges || []).map(h => h.slug).sort().map(s => "/educate/hs/" + s);
 const writingPages = (await writingFromDatabase()).sort();
 const xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
   + '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'

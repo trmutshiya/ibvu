@@ -1,3 +1,13 @@
+// IBVU v6.15 — what changed in this file: catching duplicates.
+// - Each pending submission is checked against the Herbarium (names, other names and the
+//   Latin name GBIF finds): a badge shows "Same species", "Likely duplicate" or "Possible
+//   duplicate" of which herb, and why. Submissions sent as additions to an existing herb
+//   show "Additions to …".
+// - New button "Add to existing…": add the submission's new names and uses to that herb
+//   instead of publishing a new one (see AdditionsPanel.jsx).
+// - Approved tab: herbs merged into another (Admin → Duplicates) are marked.
+// - Unpublish keeps a full copy of the herb in the edit log.
+//
 // IBVU v6.12 — what changed in this file (security fix): "Send Email" asks the server to
 // send the approval email for that herb (the server checks consent and marks it sent), so
 // the browser no longer marks it sent first or passes an email address.
@@ -17,8 +27,11 @@ import { HERBS_FALLBACK } from '../constants/herbs.js';
 import {
   SUPABASE_READY, SUBMISSIONS_KEY,
   sbFetch, sbFetchApprovedFull, sbFetchStaticHerbs,
-  sbUpdateReviewStatus, sbUnpublishHerb,
+  sbUpdateReviewStatus, sbUnpublishHerb, sbFetchHerbMerges,
 } from '../lib/supabase.js';
+import { mergeHerbs } from '../lib/herbs.js';
+import { findMatches, splitNames, STRENGTH_LABEL } from '../lib/dupes.js';
+import AdditionsPanel from './AdditionsPanel.jsx';
 import { gbifEnrich, sendApprovalEmail } from '../lib/edge.js';
 import CompletionPanel from './CompletionPanel.jsx';
 import EditPanel from './EditPanel.jsx';
@@ -34,6 +47,8 @@ export default function AdminPanel({ onBack, adminLabel = "Admin" }) {
   const [staticHerbsList, setStaticHerbsList] = useState(HERBS_FALLBACK);
   const [enrichments, setEnrichments] = useState({});
   const [sendingEmailIds, setSendingEmailIds] = useState(new Set());
+  const [merges, setMerges]           = useState([]);
+  const [adding, setAdding]           = useState(null);   // { submission, targets }
 
   async function enrichAll(submissions) {
     const pending = submissions.filter(s => !s.review_status || s.review_status === "pending");
@@ -62,7 +77,37 @@ export default function AdminPanel({ onBack, adminLabel = "Admin" }) {
     loadSubs();
     sbFetchApprovedFull().then(rows => setApprovedHerbsList(rows)).catch(() => {});
     sbFetchStaticHerbs().then(rows => { if (rows.length > 0) setStaticHerbsList(rows); }).catch(() => {});
+    sbFetchHerbMerges(true).then(setMerges).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // v6.15: the herbs the Herbarium shows, in one shape, for duplicate checks
+  const herbsNow = mergeHerbs(
+    staticHerbsList,
+    approvedHerbsList.slice().sort((x, y) => String(x.created_at || "").localeCompare(String(y.created_at || ""))).map(r => ({ ...r, uuid: r.id, ref: "approved:" + r.id, latinName: r.latin, altNames: splitNames(r.other_names), uses: Array.isArray(r.uses) ? r.uses : splitNames(r.uses) })),
+    merges,
+  );
+  const mergedInto = Object.fromEntries(merges.map(m => [m.from_ref, m.into_name || m.into_ref]));
+  function checkSubmission(s) {
+    const enr = enrichments[s.id] || {};
+    const found = findMatches({ name: s.name, otherNames: s.otherNames, latin: enr.latin || "" }, herbsNow);
+    const chosen = s.targetHerb ? herbsNow.find(h => h.ref === s.targetHerb) : null;
+    return { found, chosen };
+  }
+  function openAdding(s) {
+    const { found, chosen } = checkSubmission(s);
+    const targets = [
+      ...(chosen ? [{ herb: chosen, strength: "adds", reasons: [] }] : []),
+      ...found.filter(m => !chosen || m.herb.ref !== chosen.ref),
+    ];
+    if (!targets.length) { alert("No herb in the Herbarium matches " + s.name + ". Use Approve to publish it as a new herb."); return; }
+    setAdding({ submission: s, targets });
+  }
+  function handleAdded() {
+    const id = adding && adding.submission.id;
+    setAdding(null);
+    setSubs(prev => prev.map(s => s.id === id ? { ...s, review_status: "approved" } : s));
+    sbFetchApprovedFull().then(rows => setApprovedHerbsList(rows)).catch(() => {});
+  }
 
   async function handleReject(sub) {
     if (!window.confirm("Reject submission for " + sub.name + "?")) return;
@@ -229,7 +274,9 @@ export default function AdminPanel({ onBack, adminLabel = "Admin" }) {
                 <tbody>
                   {approvedHerbsList.map(h => (
                     <tr key={h.id}>
-                      <td style={{ fontFamily: "'Playfair Display', serif", fontWeight: 600 }}>{h.name}</td>
+                      <td style={{ fontFamily: "'Playfair Display', serif", fontWeight: 600 }}>{h.name}
+                        {mergedInto["approved:" + h.id] && <div><span className="dupe-badge possible">Merged into {mergedInto["approved:" + h.id]} · hidden</span></div>}
+                      </td>
                       <td style={{ fontStyle: "italic", color: "var(--muted)", fontSize: "0.85rem" }}>{h.latin || "—"}</td>
                       <td style={{ fontSize: "0.85rem" }}>{h.category || "—"}</td>
                       <td style={{ fontSize: "0.85rem" }}>{h.origin || "—"}</td>
@@ -266,7 +313,8 @@ export default function AdminPanel({ onBack, adminLabel = "Admin" }) {
                         <button className="reject-btn" onClick={async () => {
                           if (!window.confirm("Unpublish " + h.name + "?")) return;
                           try {
-                            await sbUnpublishHerb(h.id, h.name, adminLabel);
+                            const { submitter_email, ...record } = h; // eslint-disable-line no-unused-vars
+                            await sbUnpublishHerb(h.id, h.name, adminLabel, record);
                             setApprovedHerbsList(prev => prev.filter(x => x.id !== h.id));
                           } catch (err) { alert("Unpublish failed: " + err.message); }
                         }}>✕ Unpublish</button>
@@ -323,6 +371,19 @@ export default function AdminPanel({ onBack, adminLabel = "Admin" }) {
                           {dupNameCount[(s.name || "").toLowerCase().trim()] > 1 && (
                             <span style={{ marginLeft: 7, fontSize: 9, fontFamily: "'DM Mono', monospace", letterSpacing: 1, background: "#e65100", color: "#fff", borderRadius: 3, padding: "1px 5px", verticalAlign: "middle" }}>⚠ DUPE</span>
                           )}
+                          {tab === "pending" && (() => {
+                            const { found, chosen } = checkSubmission(s);
+                            if (s.targetHerb) return (
+                              <div className="dupe-check"><span className="dupe-badge adds">Additions to {chosen ? chosen.name : s.targetName || "a herb"}</span>
+                                {s.matchNote && <span className="dupe-why">{s.matchNote}</span>}</div>
+                            );
+                            if (!found.length) return null;
+                            const top = found[0];
+                            return (
+                              <div className="dupe-check"><span className={"dupe-badge " + top.strength}>{STRENGTH_LABEL[top.strength]} of {top.herb.name}</span>
+                                <span className="dupe-why">{top.reasons.join("; ")}{found.length > 1 ? " (+" + (found.length - 1) + " more)" : ""}</span></div>
+                            );
+                          })()}
                         </td>
                         <td style={{ color: "var(--muted)", fontStyle: "italic", fontSize: "0.85rem" }}>{s.otherNames || "—"}</td>
                         {tab === "pending" && (
@@ -349,6 +410,9 @@ export default function AdminPanel({ onBack, adminLabel = "Admin" }) {
                         {tab === "pending" && (
                           <td style={{ whiteSpace: "nowrap" }}>
                             <button className="approve-btn" onClick={() => handleApprove(s)} style={{ marginRight: 6 }}>Approve</button>
+                            {(s.targetHerb || checkSubmission(s).found.length > 0) && (
+                              <button className="approve-btn" onClick={() => openAdding(s)} style={{ marginRight: 6 }}>Add to existing…</button>
+                            )}
                             <button className="reject-btn" onClick={() => handleReject(s)}>Reject</button>
                           </td>
                         )}
@@ -367,6 +431,16 @@ export default function AdminPanel({ onBack, adminLabel = "Admin" }) {
             onPublish={handlePublished}
             onCancel={() => setCompleting(null)}
             adminEmail={adminLabel}
+          />
+        )}
+
+        {adding && (
+          <AdditionsPanel
+            submission={adding.submission}
+            targets={adding.targets}
+            adminLabel={adminLabel}
+            onDone={handleAdded}
+            onCancel={() => setAdding(null)}
           />
         )}
 
