@@ -1,3 +1,8 @@
+// IBVU v6.14 — what changed in this file (Other names shown on herb pages, no database change):
+// - sbFetchApproved now passes each approved herb's other names to the Herbarium and herb
+//   pages (altNames, split at commas). Before, the names were fetched but dropped, so every
+//   approved herb showed "Other names: Not recorded".
+//
 // IBVU v6.13 — what changed in this file (Other names fix, no database change):
 // - Editing a herb in Herb review now saves "Other names". sbUpdateHerb used to strip
 //   other_names before saving (left over from when approved_herbs had no such column),
@@ -228,6 +233,7 @@ export async function sbFetchApproved() {
         uses:        Array.isArray(r.uses) ? r.uses : (r.uses || "").split(",").map(u => u.trim()).filter(Boolean),
         conditions:  Array.isArray(r.conditions) ? r.conditions : [],
         color:       r.color || "#a8c5a0",
+        altNames:    (r.other_names || "").split(",").map(n => n.trim()).filter(Boolean),
       };
     });
   } catch { return []; }
