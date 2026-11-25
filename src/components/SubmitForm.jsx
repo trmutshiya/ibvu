@@ -1,3 +1,12 @@
+// IBVU v6.16 — what changed in this file: herb submissions are spam-proof.
+// - The submission (and its photo, if any) is sent to the site-forms function on the
+//   server, which checks the Cloudflare security token itself before saving. Before,
+//   the token was checked in a separate step and the browser then saved the submission
+//   straight into the database, so the check could be skipped.
+// - The literature check now runs first, then everything is sent in one step.
+// - If the server does not know herb submissions yet (the new function not deployed),
+//   the old way is used, so the order of deploying does not matter.
+//
 // IBVU v6.15 — what changed in this file: catching duplicates.
 // - Before sending, the herb is compared with the Herbarium (name and other names; see
 //   src/lib/dupes.js). If it is very likely already there, the person is asked "Is it one of
@@ -31,7 +40,7 @@
 // Everything else (fields, security check, PubMed screening, saving) is unchanged.
 import { track } from '../lib/analytics.js';
 import { useState, useEffect, useRef } from 'react';
-import { SUPABASE_READY, SUBMISSIONS_KEY, sbInsert } from '../lib/supabase.js';
+import { SUPABASE_READY, SUBMISSIONS_KEY, sbInsert, sbSendSubmission } from '../lib/supabase.js';
 import { proxyPubMed, EDGE_VERIFY_TURNSTILE_URL, TURNSTILE_SITE_KEY } from '../lib/edge.js';
 import { SUPABASE_ANON_KEY } from '../lib/supabase.js';
 import { fileToImage, submitHerbPhoto, usePage } from '../lib/content.js';
@@ -141,40 +150,12 @@ export default function SubmitForm({ herbs = [] }) {
 
     try {
       const sendsPhoto = !!(photo && photoMine);
-      let photoSent = false;
-      if (tsToken !== "__local_bypass__" && sendsPhoto && SUPABASE_READY) {
-        // The server checks the security token while receiving the photo.
-        const sent = await submitHerbPhoto(form.name, photo, tsToken);
-        if (!sent || !sent.ok) {
-          setTsToken("");
-          if (tsWidgetIdRef.current !== null) { try { window.turnstile.reset(tsWidgetIdRef.current); } catch(_) {} }
-          setErrors(prev => ({ ...prev, photo: (sent && sent.error) || "The photo could not be sent. Please try again, or remove it." }));
-          setScreening(null);
-          return;
-        }
-        photoSent = true;
-      } else if (tsToken !== "__local_bypass__") {
-        const tvRes = await fetch(EDGE_VERIFY_TURNSTILE_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "apikey": SUPABASE_ANON_KEY,
-            "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-          },
-          body: JSON.stringify({ token: tsToken }),
-        });
-        if (!tvRes.ok) { setScreening("error"); return; }
-        const tvData = await tvRes.json();
-        if (!tvData.success) {
-          setTsToken("");
-          if (tsWidgetIdRef.current !== null) { try { window.turnstile.reset(tsWidgetIdRef.current); } catch(_) {} }
-          setErrors(prev => ({ ...prev, _turnstile: "Security check failed. Please try again." }));
-          setScreening(null);
-          return;
-        }
-      }
+      const resetCheck = () => {
+        setTsToken("");
+        if (tsWidgetIdRef.current !== null) { try { window.turnstile.reset(tsWidgetIdRef.current); } catch(_) {} }
+      };
 
-      // Without a database connection (the preview build) the literature check
+      // The literature check. Without a database connection (the preview build) it
       // cannot run, so the submission is simply kept for review.
       let count = 0;
       let status = "pending";
@@ -184,11 +165,7 @@ export default function SubmitForm({ herbs = [] }) {
         const data  = await proxyPubMed("esearch", { db: "pubmed", term: term, retmax: 1, retmode: "json" });
         count = parseInt(data.esearchresult?.count || "0", 10);
         status = count > 0 ? "pending" : "insufficient-evidence";
-        setScreening(count > 0 ? "passed" : "flagged");
-      } else {
-        setScreening("preview");
       }
-      setPaperCount(count);
 
       // v6.15: additions to an existing herb send only what the person kept ticked
       const keptNames = offer.names.filter(n => picked["n:" + n]);
@@ -213,12 +190,54 @@ export default function SubmitForm({ herbs = [] }) {
           (keptNames.includes(form.name.trim()) ? "" : ". Name they used: " + form.name.trim());
       }
 
-      if (SUPABASE_READY) {
-        await sbInsert(entry);
+      let photoSent = false;
+      if (SUPABASE_READY && tsToken !== "__local_bypass__") {
+        // v6.16: one step on the server: security check, photo, submission.
+        const sent = await sbSendSubmission(entry, tsToken, sendsPhoto ? photo : null);
+        if (sent.ok) {
+          photoSent = sendsPhoto;
+        } else if (!sent.oldServer) {
+          resetCheck();
+          if (sent.status === 403) setErrors(prev => ({ ...prev, _turnstile: "Security check failed. Please try again." }));
+          else if (sendsPhoto && /photo/i.test(sent.error || "")) setErrors(prev => ({ ...prev, photo: sent.error }));
+          else setErrors(prev => ({ ...prev, _turnstile: sent.error || "Your submission could not be sent. Please try again." }));
+          setScreening(sent.status === 500 ? "error" : null);
+          return;
+        } else {
+          // The server does not know herb submissions yet: the earlier way.
+          if (sendsPhoto) {
+            const p = await submitHerbPhoto(form.name, photo, tsToken);
+            if (!p || !p.ok) {
+              resetCheck();
+              setErrors(prev => ({ ...prev, photo: (p && p.error) || "The photo could not be sent. Please try again, or remove it." }));
+              setScreening(null);
+              return;
+            }
+            photoSent = true;
+          } else {
+            const tvRes = await fetch(EDGE_VERIFY_TURNSTILE_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY },
+              body: JSON.stringify({ token: tsToken }),
+            });
+            const tvData = tvRes.ok ? await tvRes.json() : {};
+            if (!tvData.success) {
+              resetCheck();
+              setErrors(prev => ({ ...prev, _turnstile: "Security check failed. Please try again." }));
+              setScreening(null);
+              return;
+            }
+          }
+          await sbInsert(entry);
+        }
+      } else if (SUPABASE_READY) {
+        await sbInsert(entry);   // on the computer (localhost), where there is no security check
       } else {
         const prev = JSON.parse(localStorage.getItem(SUBMISSIONS_KEY) || "[]");
         localStorage.setItem(SUBMISSIONS_KEY, JSON.stringify([...prev, entry]));
       }
+      setPaperCount(count);
+      setScreening(SUPABASE_READY ? (count > 0 ? "passed" : "flagged") : "preview");
       // Preview: the photo (if any) waits in this browser for review.
       if (sendsPhoto && !photoSent && !SUPABASE_READY) submitHerbPhoto(form.name, photo);
       setDone(true);

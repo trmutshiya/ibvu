@@ -1,3 +1,8 @@
+// IBVU v6.16 — what changed in this file: new sbSendSubmission sends a herb submission (and
+// its photo) to the site-forms function, which checks the security token and saves it.
+// sbInsert (the browser saving straight into the database) is now only a fallback; after
+// database step 6 the database refuses it.
+//
 // IBVU v6.15 — what changed in this file (duplicates and merging; needs database step 5 for
 // the new parts, works without it):
 // - Herbs carry a "ref" that names them for merging: "approved:<id>" or "builtin:<id>".
@@ -75,6 +80,30 @@ export async function sbFetchAll(table, query, asStaff = false) {
     offset += PAGE;
   }
   return all;
+}
+
+// v6.16: Returns { ok } or { ok: false, status, error, oldServer }. oldServer is true when
+// the server's site-forms function does not know herb submissions yet.
+export async function sbSendSubmission(entry, turnstileToken, photo) {
+  const body = {
+    kind: "herb", turnstileToken,
+    name: entry.name, otherNames: entry.otherNames, uses: entry.uses, country: entry.country,
+    email: entry.email, consent: !!entry.consent, pubmedStatus: entry.status, pubmedCount: entry.paperCount,
+    ...(entry.targetHerb ? { targetHerb: entry.targetHerb, targetName: entry.targetName || "", matchNote: entry.matchNote || "" } : {}),
+    ...(photo ? { image: photo, permission: true } : {}),
+  };
+  try {
+    const res = await fetch(SUPABASE_URL + "/functions/v1/site-forms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) return { ok: true };
+    return { ok: false, status: res.status, error: data.error || "", oldServer: res.status === 400 && data.error === "Unknown request." };
+  } catch {
+    return { ok: false, status: 0, error: "Could not reach the website's server. Check your connection and try again." };
+  }
 }
 
 export async function sbInsert(entry) {

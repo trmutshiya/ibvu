@@ -1,3 +1,7 @@
+// IBVU v6.16 — what changed in this file: database step 6 and site-forms version 3. Visitors
+// can no longer write to submissions directly; herb submissions (kind "herb", with an
+// optional photo) go through the stand-in site-forms function, which needs the test
+// security token.
 // IBVU v6.15 — what changed in this file: the duplicate tables (database step 5):
 // herb_merges (everyone reads which herbs are merged, only from_ref and into_ref; herb
 // reviewers write) and herb_not_duplicates (herb reviewers only). Submissions accept
@@ -235,6 +239,25 @@ http.createServer(async (req, res) => {
       const confirmSent = addTo(json.email, json.firstName, json.lastName, json.lists || ['monthly'], json.source || 'newsletter box');
       return send(res, 200, { ok: true, confirmSent });
     }
+    if (json.kind === 'herb') {
+      const email = String(json.email || '').toLowerCase();
+      if (!json.name || !json.uses || !json.country || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return send(res, 400, { ok: false, error: "Please fill in the herb's name, its uses, your country and your email address." });
+      if (json.image) {
+        const m = /^data:(image\/\w+);base64,(.+)$/.exec(json.image || '');
+        if (!m || json.permission !== true) return send(res, 400, { ok: false, error: 'That photo could not be read.' });
+        const path = crypto.randomUUID() + '.jpg';
+        store['herb-photo-submissions/' + path] = { type: m[1], data: Buffer.from(m[2], 'base64') };
+        db.herb_photos.push(defaults('herb_photos', { herb_key: json.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), herb_name: json.name, image_path: path, status: 'pending', source: 'submission', permission: true }));
+      }
+      const target = /^(approved:[0-9a-f-]{36}|builtin:\d{1,6})$/i.test(json.targetHerb || '') ? json.targetHerb : null;
+      db.submissions.push(defaults('submissions', {
+        common_name: json.name, other_names: json.otherNames || '', traditional_uses: json.uses, country: json.country, email,
+        consent: json.consent === true, pubmed_status: json.pubmedStatus === 'insufficient-evidence' ? 'insufficient-evidence' : 'pending',
+        pubmed_count: Math.max(0, Math.floor(Number(json.pubmedCount) || 0)), review_status: 'pending',
+        ...(target ? { target_herb: target, target_name: json.targetName || '', match_note: json.matchNote || '' } : {}),
+      }));
+      return send(res, 200, { ok: true });
+    }
     if (json.kind === 'herb-photo') {
       const m = /^data:(image\/\w+);base64,(.+)$/.exec(json.image || '');
       if (!m || json.permission !== true) return send(res, 400, { ok: false, error: 'bad photo' });
@@ -404,7 +427,7 @@ http.createServer(async (req, res) => {
     if (!db[table]) return send(res, 404, { message: 'no table' });
     const all = db[table];
     const seen = visible(table, all, who);
-    if (seen === null && !(table === 'submissions' && req.method === 'POST')) return send(res, 401, { code: '42501', message: 'permission denied for table ' + table });
+    if (seen === null) return send(res, 401, { code: '42501', message: 'permission denied for table ' + table });   // v6.16: no direct submissions
     const prefer = req.headers.prefer || '';
     const wantsObject = (req.headers.accept || '').includes('vnd.pgrst.object');
     const returnRows = rows => {

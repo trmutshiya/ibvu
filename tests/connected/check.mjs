@@ -1,3 +1,7 @@
+// IBVU v6.16 — what changed in this file: herb submissions go through the server's
+// security check. New checks: a visitor cannot save a submission straight into the
+// database, or through the server without passing the security check; a submission with
+// a photo is saved in one step.
 // IBVU v6.15 — what changed in this file: duplicates. The Ginger submission answers "No, it's
 // a different plant" (Ginger is a built-in herb, so the form now asks). New checks: a visitor
 // is asked "Is it one of these?" and sends additions to African pepper; the Owner adds them
@@ -229,6 +233,10 @@ export async function check() {
 
   // v6.12: the security fix
   const anonH = { apikey: 'anon-test-key', Authorization: 'Bearer anon-test-key', 'Content-Type': 'application/json' };
+  ok('v6.16 a visitor cannot save a submission straight into the database', (await fetch(M + '/rest/v1/submissions', { method: 'POST', headers: anonH, body: JSON.stringify({ common_name: 'Spam', traditional_uses: 'x', country: 'x', email: 'x@example.org' }) })).status === 401);
+  const before16 = (await dbNow()).submissions.length;
+  const noCheck = await fetch(M + '/functions/v1/site-forms', { method: 'POST', headers: anonH, body: JSON.stringify({ kind: 'herb', turnstileToken: 'made-up', name: 'Spam', uses: 'x', country: 'x', email: 'x@example.org' }) });
+  ok('v6.16 the server refuses a submission that did not pass the security check', noCheck.status === 403 && (await dbNow()).submissions.length === before16);
   ok('a visitor cannot read submissions', (await fetch(M + '/rest/v1/submissions?select=*', { headers: anonH })).status === 401);
   ok('a visitor cannot read herbs\' private columns', (await fetch(M + '/rest/v1/approved_herbs?select=*', { headers: anonH })).status === 401);
   ok('a visitor cannot add a published herb', (await fetch(M + '/rest/v1/approved_herbs', { method: 'POST', headers: anonH, body: JSON.stringify({ name: 'Fake herb' }) })).status >= 400);

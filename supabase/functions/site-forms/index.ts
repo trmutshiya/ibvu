@@ -1,3 +1,12 @@
+// IBVU: site-forms. Version 3 (25 Nov 2026, website v6.16): herb submissions.
+// - New kind "herb": a herb submission from the Herbarium form. It must pass the
+//   Cloudflare spam check here, like the contact form; the website no longer saves
+//   submissions itself, and after database step 6 visitors cannot write to the
+//   submissions table at all. A photo sent with the herb is saved in the same step
+//   (one spam check for both). Additions to an existing herb (v6.15) carry
+//   targetHerb, targetName and matchNote.
+// - Every field is checked and cut to size here; the literature status can only be
+//   "pending" or "insufficient-evidence".
 // IBVU: site-forms. Version 2 (13 Nov 2026, website v6.02): mailing lists.
 // - A newsletter sign-up carries the lists the person chose. They are not
 //   added straight away: they get an email with a Confirm button, and only
@@ -15,10 +24,12 @@
 // Receives what a visitor can send from ibvu.org:
 //   kind "contact"     the contact form   -> saved, and emailed to hello@ibvu.org
 //   kind "newsletter"  a newsletter sign-up -> saved; a Confirm email is sent
-//   kind "herb-photo"  a photo sent with a herb submission -> kept privately
+//   kind "herb"        a herb submission (with or without a photo) -> saved
+//                      for herb review (v6.16)
+//   kind "herb-photo"  a photo on its own (older websites) -> kept privately
 //                      until someone with herb review approves it
 //   kind "confirm", "unsubscribe-info", "unsubscribe": the links in emails
-// The first three must pass the Cloudflare spam check. The links carry a
+// The first four must pass the Cloudflare spam check. The links carry a
 // private token instead. Visitors cannot write to the database themselves;
 // only this function can, after checking what was sent.
 //
@@ -74,7 +85,7 @@ const oneLine = (s: string) => s.replace(/[\r\n]+/g, " ");
 
 // Same rule as the website (src/lib/slug.js).
 function slugify(text: string) {
-  return (text || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "")
+  return (text || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70) || "untitled";
 }
 
@@ -310,6 +321,44 @@ async function herbPhoto(body: Record<string, unknown>) {
   return json({ ok: true });
 }
 
+/* ── herb submissions (v6.16) ────────────────────────────────────────── */
+
+const TARGET = /^(approved:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|builtin:\d{1,6})$/i;
+
+async function herbSubmission(body: Record<string, unknown>) {
+  const name = clean(body.name, 200);
+  const otherNames = clean(body.otherNames, 1000);
+  const uses = clean(body.uses, 2000);
+  const country = clean(body.country, 100);
+  const email = clean(body.email, 254).toLowerCase();
+  if (!name || !uses || !country || !isEmail(email)) {
+    return json({ ok: false, error: "Please fill in the herb's name, its uses, your country and your email address." }, 400);
+  }
+  const status = body.pubmedStatus === "insufficient-evidence" ? "insufficient-evidence" : "pending";
+  const n = Number(body.pubmedCount);
+  const count = Number.isFinite(n) ? Math.max(0, Math.min(10_000_000, Math.floor(n))) : 0;
+  const target = clean(body.targetHerb, 80);
+  const row: Record<string, unknown> = {
+    common_name: name, other_names: otherNames, traditional_uses: uses, country, email,
+    consent: body.consent === true, pubmed_status: status, pubmed_count: count, review_status: "pending",
+  };
+  if (target && TARGET.test(target)) {
+    row.target_herb = target;
+    row.target_name = clean(body.targetName, 200);
+    row.match_note = clean(body.matchNote, 500);
+  }
+
+  // The photo first, so a photo that cannot be read stops the whole submission
+  // (the person sees why and can remove it) and nothing is half-saved.
+  if (body.image) {
+    const photo = await herbPhoto({ herbName: name, image: body.image, permission: body.permission });
+    if (photo.status !== 200) return photo;
+  }
+  const saved = await db("submissions", { method: "POST", body: JSON.stringify(row) });
+  if (!saved.ok) return json({ ok: false, error: "Your submission could not be saved. Please try again." }, 500);
+  return json({ ok: true });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
   if (req.method !== "POST") return json({ ok: false, error: "Not allowed." }, 405);
@@ -334,7 +383,7 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "Something went wrong. Please try again." }, 500);
   }
 
-  if (!["contact", "newsletter", "herb-photo"].includes(kind)) return json({ ok: false, error: "Unknown request." }, 400);
+  if (!["contact", "newsletter", "herb-photo", "herb"].includes(kind)) return json({ ok: false, error: "Unknown request." }, 400);
 
   if (!(await passedSpamCheck(clean(body.turnstileToken, 4096)))) {
     return json({ ok: false, error: "The security check did not pass. Please try again." }, 403);
@@ -343,6 +392,7 @@ Deno.serve(async (req) => {
   try {
     if (kind === "contact") return await contact(body, origin);
     if (kind === "newsletter") return await newsletter(body, origin);
+    if (kind === "herb") return await herbSubmission(body);
     return await herbPhoto(body);
   } catch {
     return json({ ok: false, error: "Something went wrong. Please try again." }, 500);
